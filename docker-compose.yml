@@ -1,0 +1,60 @@
+services:
+  app:
+    SPRING_PROFILES_ACTIVE: dev
+    build: .
+    container_name: growthbook-ai-demo
+    ports:
+      - "8080:8080"
+    env_file: .env
+    depends_on:
+      - growthbook
+      - mongo
+      - events-postgres        # ⬅ додали залежність від Postgres
+    networks: [appnet]
+
+  growthbook:
+    image: growthbook/growthbook
+    container_name: growthbook
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/growthbook
+      - NODE_ENV=production
+      - ENCRYPTION_KEY=zXgROa2/iBZ+sdqR3eHOwhfkKqrVhBFwoaZaasxiB4M=
+      - JWT_SECRET=AvuC3hJxssx1gcGESL3E3dO5iSKCYD76EDwiQF7GH/o=
+      - ENABLE_ADMIN_API=true
+      - ADMIN_API_KEYS=${GB_ADMIN_TOKEN}
+      - APP_ORIGIN=http://localhost:3000
+    ports:
+      - "3000:3000"  # UI
+      - "3100:3100"  # Admin/API
+    depends_on:
+      - mongo
+    networks: [appnet]
+
+  mongo:
+    image: mongo:6
+    container_name: mongo
+    volumes:
+      - mongo_data:/data/db
+    networks: [appnet]
+
+  # 🆕 Postgres для подій/аналітики
+  events-postgres:
+    image: postgres:16-alpine
+    container_name: events-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gb_events
+      POSTGRES_USER: gb_user
+      POSTGRES_PASSWORD: gb_password
+    ports:
+      - "5433:5432"        # ззовні 5433, всередині 5432 (щоб не конфліктувати з локальним 5432)
+    volumes:
+      - events_pg_data:/var/lib/postgresql/data
+    networks: [appnet]
+
+networks:
+  appnet:
+
+volumes:
+  mongo_data:
+  events_pg_data:   # 🆕 volume для збереження даних Postgres

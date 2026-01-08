@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;padding:24px}
+    .chat{max-width:860px;margin:auto}
+    .log{border:1px solid #eee;border-radius:8px;padding:12px;min-height:240px;background:#fafafa;white-space:pre-wrap}
+    .row{display:flex;gap:8px;margin-top:12px}
+    input,button{padding:10px;border-radius:8px;border:1px solid #ddd}
+    button{background:#2b6cff;color:#fff;border-color:#2b6cff;cursor:pointer}
+    .sys{color:#666}
+  </style>
+</head>
+<body>
+  <div class="chat">
+    <h2>GrowthBook AI — Console</h2>
+    <p class="sys">Пиши: "покажи інвентар для http://localhost:8080/", "зміни текст .btn-cta", "створи рецепт dom_patch_hero_v1".</p>
+    <div id="log" class="log"></div>
+    <div class="row">
+      <input id="msg" type="text" placeholder="Повідомлення агенту…" style="flex:1"/>
+      <button id="send">Send</button>
+    </div>
+  </div>
+
+  <script>
+    const log = document.getElementById('log');
+    const input = document.getElementById('msg');
+    const btn = document.getElementById('send');
+
+    function append(role, text) {
+      log.textContent += `\\n${role}: ${text}`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    btn.onclick = async () => {
+      const m = input.value.trim();
+      if (!m) return;
+      append('You', m);
+      input.value='';
+      try {
+        const res = await fetch('/api/ai/chat', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({message:m})
+        });
+        const data = await res.json();
+        append('AI', data.reply || '[empty]');
+      } catch(e) {
+        append('AI', 'Error: '+e);
+      }
+    };
+    input.addEventListener('keydown', e => { if (e.key==='Enter') btn.click(); });
+  </script>
+</body>
+</html>

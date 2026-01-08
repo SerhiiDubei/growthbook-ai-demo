@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="uk" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>GrowthBook DOM Console</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- CSRF (на випадок, якщо буде ввімкнено) -->
+  <meta th:name="_csrf" th:content="${_csrf.token}" />
+  <meta th:name="_csrf_header" th:content="${_csrf.headerName}" />
+
+  <style>
+    .card { border-radius: 1rem; border: 1px solid #e2e8f0; background: #ffffff; box-shadow: 0 10px 25px rgba(15,23,42,0.06); }
+    .label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
+    .pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:0.7rem; background:#eff6ff; color:#1d4ed8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:0.4rem;
+      padding:0.45rem 0.9rem; border-radius:0.75rem; font-weight:500; font-size:0.85rem;
+      border:1px solid transparent; transition:all 0.18s ease-in-out; cursor:pointer;
+    }
+    .btn-primary { background:#4f46e5; color:white; box-shadow:0 4px 14px rgba(79,70,229,0.35); }
+    .btn-primary:hover { background:#4338ca; transform:translateY(-1px); }
+    .btn-neutral { background:#f1f5f9; color:#0f172a; }
+    .btn-neutral:hover { background:#e2e8f0; }
+    .btn-outline { background:white; color:#0f172a; border-color:#cbd5f5; }
+    .btn-outline:hover { background:#eff6ff; }
+    .btn-soft { background:#22c55e; color:white; box-shadow:0 4px 10px rgba(34,197,94,0.35); }
+    .btn-soft:hover { background:#16a34a; transform:translateY(-1px); }
+
+    textarea { font-size:0.8rem; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-slate-50 to-indigo-50 text-slate-900 min-h-screen">
+
+<div class="max-w-7xl mx-auto p-6 space-y-6">
+
+  <!-- HEADER -->
+  <header class="card bg-gradient-to-r from-indigo-600 to-sky-500 text-white p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="px-2 py-0.5 text-[0.65rem] rounded-full bg-white/15 border border-white/20 uppercase tracking-[0.15em]">
+          Internal Tool
+        </span>
+      </div>
+      <h1 class="text-2xl md:text-3xl font-semibold">GrowthBook DOM Console</h1>
+      <p class="text-xs md:text-sm text-indigo-100 mt-1">
+        Інвентаризація DOM → Авто-фічі (<span class="mono">site__page__slot</span>) → Редагування → Автоматичне застосування через GrowthBook SDK.
+      </p>
+    </div>
+    <div class="flex flex-col gap-1 items-start md:items-end">
+      <label class="text-[0.7rem] text-indigo-100">QA / Session Tag</label>
+      <div class="flex gap-2">
+        <input id="qaId"
+               class="px-3 py-1.5 rounded-md text-slate-900 text-sm border border-indigo-200/40 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+               th:value="${qaUserId}" placeholder="qa-vitaliy"/>
+        <button id="pinQa" class="btn btn-soft">Зберегти</button>
+      </div>
+      <div class="text-[0.6rem] text-indigo-100/80">
+        Використовується як <span class="mono">gbtag</span> для превʼю і таргетингу.
+      </div>
+    </div>
+  </header>
+
+  <!-- TOP GRID -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- LEFT: TARGET / INVENTORY / REGISTRY -->
+    <section class="card p-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="label">Цільовий сайт</div>
+          <div class="text-sm text-slate-800">URL + інтегрований ai-bridge.js</div>
+        </div>
+        <span class="pill">SITE / PAGE</span>
+      </div>
+
+      <div class="flex gap-2">
+        <input id="siteUrl"
+               class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+               th:value="${defaultUrl}" placeholder="http://localhost:8080/"/>
+        <button id="openPreview" class="btn btn-outline">Open Preview</button>
+        <button id="loadInventory" class="btn btn-primary">Load inv</button>
+      </div>
+
+      <div class="flex items-center justify-between mt-1">
+        <div class="label">Inventory (живий DOM)</div>
+        <div class="text-[0.65rem] text-slate-500">
+          items: <span id="diagCount" class="mono">0</span>
+        </div>
+      </div>
+      <div id="inventoryList" class="mt-1 max-h-52 overflow-auto divide-y divide-slate-100 text-xs"></div>
+
+      <div class="flex items-center justify-between mt-3">
+        <div class="label">Registry map (site__page__slot)</div>
+        <button id="reloadMap" class="btn btn-neutral text-[0.7rem]">Reload map</button>
+      </div>
+      <div id="registryMap" class="mt-1 max-h-40 overflow-auto text-[0.65rem] bg-slate-50 rounded-lg p-2 mono text-slate-600"></div>
+    </section>
+
+    <!-- RIGHT: BUILDER + FEATURE -->
+    <section class="card p-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="label">Recipe Builder</div>
+          <div class="text-sm text-slate-800">Обери елемент → створи <span class="mono">ops</span></div>
+        </div>
+      </div>
+
+      <!-- Quick op builder -->
+      <div class="grid grid-cols-12 gap-2">
+        <input id="qbSelector" class="col-span-5 border border-slate-300 rounded-xl px-2 py-1.5 text-xs"
+               placeholder=".btn-cta або #id або [data-gb-id=...]"/>
+        <select id="qbKind" class="col-span-2 border border-slate-300 rounded-xl px-2 py-1.5 text-xs">
+          <option value="text">text</option>
+          <option value="html:safe">html</option>
+          <option value="css">css</option>
+          <option value="attr">attr</option>
+          <option value="class:add">class +</option>
+          <option value="class:remove">class -</option>
+          <option value="remove">remove</option>
+        </select>
+        <input id="qbProp" class="col-span-2 border border-slate-300 rounded-xl px-2 py-1.5 text-xs"
+               placeholder="prop / name"/>
+        <input id="qbValue" class="col-span-2 border border-slate-300 rounded-xl px-2 py-1.5 text-xs"
+               placeholder="value"/>
+        <button id="addOp" class="col-span-1 btn btn-soft text-[0.65rem] px-1">Add</button>
+      </div>
+
+      <!-- Ops JSON -->
+      <div>
+        <div class="label mb-1">Ops JSON</div>
+        <textarea id="opsJson"
+                  class="w-full h-40 border border-slate-300 rounded-xl px-2 py-2 mono"
+                  spellcheck="false">{ "ops": [] }</textarea>
+      </div>
+
+      <!-- Feature Key -->
+      <div class="grid grid-cols-12 gap-2 items-center">
+        <div class="col-span-9">
+          <div class="label mb-1">Feature key (site__page__slot)</div>
+          <input id="gbKey"
+                 class="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs mono"
+                 placeholder="demo__home__cta_try_now"/>
+        </div>
+        <div class="col-span-3 flex flex-col gap-1 mt-4">
+          <button id="suggestKey" class="btn btn-neutral text-[0.65rem]">Suggest</button>
+          <button id="previewLocal" class="btn btn-outline text-[0.65rem]">Preview local</button>
+        </div>
+      </div>
+
+      <!-- Env + Upsert -->
+      <div class="grid grid-cols-12 gap-2 mt-2">
+        <div class="col-span-4">
+          <div class="label mb-1">Env</div>
+          <select id="gbEnv"
+                  class="w-full border border-slate-300 rounded-xl px-2 py-1.5 text-xs">
+            <option value="production">production</option>
+            <option value="dev">dev</option>
+          </select>
+        </div>
+        <div class="col-span-8 flex items-end justify-end gap-2">
+          <button id="upsertFeature" class="btn btn-primary w-full">
+            Upsert to GrowthBook
+          </button>
+        </div>
+      </div>
+
+      <!-- Rules (простий режим) -->
+      <details class="mt-2">
+        <summary class="cursor-pointer text-xs text-slate-700 font-medium">
+          Налаштування правил (опційно)
+        </summary>
+        <div class="mt-2 space-y-2">
+          <div class="grid grid-cols-12 gap-2 items-center">
+            <select id="ruleType" class="col-span-3 border border-slate-300 rounded-xl px-2 py-1.5 text-xs">
+              <option value="on">100% всім</option>
+              <option value="percent">Rollout %</option>
+              <option value="qa">QA / whitelist</option>
+            </select>
+            <input id="ruleFilter"
+                   class="col-span-4 border border-slate-300 rounded-xl px-2 py-1.5 text-xs"
+                   placeholder="when: role=qa; country=UA"/>
+            <input id="ruleParam"
+                   class="col-span-3 border border-slate-300 rounded-xl px-2 py-1.5 text-xs"
+                   placeholder="% або ids через ,"/>
+            <button id="addRule"
+                    class="col-span-2 btn btn-soft text-[0.65rem] px-1">
+              Add rule
+            </button>
+          </div>
+          <textarea id="rulesJson"
+                    class="w-full h-28 border border-slate-300 rounded-xl px-2 py-2 mono text-[0.7rem]"
+                    spellcheck="false"
+                    placeholder='[ { "type":"on" } ]'></textarea>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <!-- DIAGNOSTICS -->
+  <section class="card p-4 bg-slate-50/80">
+    <div class="flex items-center justify-between mb-2">
+      <div class="label">Diagnostics</div>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[0.7rem] text-slate-700">
+      <div>SiteId / PageId: <span id="diagSitePage" class="mono"></span></div>
+      <div>Last inventory: <span id="diagFetch" class="mono">—</span></div>
+      <div>Last upsert env: <span id="diagEnv" class="mono">—</span></div>
+      <div>Last status: <span id="diagMsg" class="mono text-slate-500">—</span></div>
+    </div>
+  </section>
+
+  <!-- AI AGENT CHAT -->
+  <section class="card p-4">
+    <div class="flex items-center justify-between mb-2">
+      <div>
+        <div class="label">AI агент</div>
+        <div class="text-xs text-slate-700">
+          Тестуй агента: аналіз фіч, генерація рецептів, upsert в GrowthBook.
+        </div>
+      </div>
+      <span class="pill">LLM / Tools</span>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2">
+      <div class="md:col-span-1">
+        <div class="label mb-1">Memory ID (опційно)</div>
+        <input id="aiMemoryId"
+               class="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs mono"
+               placeholder="qa-vitaliy"/>
+        <div class="text-[0.65rem] text-slate-500 mt-1">
+          Якщо порожньо — використає HttpSession. Якщо заповнити — діалог стабільний між вкладками.
+        </div>
+      </div>
+
+      <div class="md:col-span-3">
+        <div class="label mb-1">Повідомлення</div>
+        <textarea id="aiMessage"
+                  class="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs mono h-24"
+                  placeholder="Наприклад: Проаналізуй фічу localhost_8080__home__cta__hero_button за 7 днів і запропонуй рецепт."></textarea>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex gap-2">
+        <button id="aiSend" class="btn btn-primary">Send</button>
+        <button id="aiReset" class="btn btn-neutral">Reset memory</button>
+      </div>
+      <div id="aiStatus" class="text-[0.65rem] text-slate-500 mono">—</div>
+    </div>
+
+    <div>
+      <div class="label mb-1">Відповідь</div>
+      <pre id="aiReply"
+           class="w-full border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-[0.75rem] mono whitespace-pre-wrap min-h-[4rem]">—</pre>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    // ---------- DOM helpers ----------
+    const $ = (s) => document.querySelector(s);
+
+    const state = {
+      url: "",
+      origin: "",
+      siteId: "",
+      pageId: "",
+      pageKey: "",
+      inventoryLive: [],
+      inventoryMerged: [],
+      registryAll: {},
+      registryForPage: {}
+    };
+
+    // ---------- UI helpers ----------
+    function toast(msg) {
+      const el = document.createElement("div");
+      el.textContent = msg;
+      el.className =
+          "fixed bottom-4 right-4 bg-slate-900 text-white text-xs rounded-xl px-4 py-2 shadow-lg z-50";
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 2200);
+    }
+
+    function csrfHdr() {
+      const t = document.querySelector('meta[name="_csrf"]')?.content;
+      const h =
+          document.querySelector('meta[name="_csrf_header"]')?.content ||
+          "X-CSRF-TOKEN";
+      return t ? { [h]: t } : {};
+    }
+
+    // ---------- util ----------
+    function slug(str, fallback) {
+      if (!str) return fallback;
+      return (
+          str
+          .toString()
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "") || fallback
+      );
+    }
+
+    function shortHash(str) {
+      if (!str) return "x";
+      let h = 1125899907;
+      for (let i = 0; i < str.length; i++) {
+        h = (31 * h + str.charCodeAt(i)) | 0;
+      }
+      let hex = (h >>> 0).toString(16);
+      if (hex.length > 8) hex = hex.slice(-8);
+      return ("00000000" + hex).slice(-8);
+    }
+
+    function getSiteIdFromUrl(url) {
+      try {
+        const u = new URL(url);
+        const host = u.hostname + (u.port ? "_" + u.port : "");
+        return slug(host, "site");
+      } catch {
+        return "site";
+      }
+    }
+
+    function getPageIdFromUrl(url) {
+      try {
+        const u = new URL(url);
+        const p = u.pathname || "/";
+        if (p === "/" || p === "") return "home";
+        const norm = p
+        .replace(/^\/+/, "")
+        .replace(/\/+$/, "")
+        .replace(/\//g, "_");
+        return slug(norm, "page");
+      } catch {
+        return "page";
+      }
+    }
+
+    function computeSitePage() {
+      if (!state.url) return "";
+      state.siteId = getSiteIdFromUrl(state.url);
+      state.pageId = getPageIdFromUrl(state.url);
+      state.pageKey = state.siteId + "__" + state.pageId;
+      return state.pageKey;
+    }
+
+    function escHtml(s) {
+      return (s || "")
+      .toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+    }
+
+    // ---------- QA pin ----------
+    if ($("#pinQa")) {
+      $("#pinQa").onclick = () => {
+        const id = $("#qaId").value.trim() || "qa";
+        localStorage.setItem("qaId", id);
+        toast("QA / gbag збережено: " + id);
+      };
+    }
+
+    (function initQA() {
+      const saved = localStorage.getItem("qaId");
+      if (saved && $("#qaId")) $("#qaId").value = saved;
+    })();
+
+    // ---------- Open preview ----------
+    if ($("#openPreview")) {
+      $("#openPreview").onclick = () => {
+        const url = $("#siteUrl").value.trim();
+        const qa = $("#qaId")?.value.trim() || "qa";
+        if (!url) return toast("Вкажи URL сайту");
+        try {
+          const u = new URL(url);
+          u.searchParams.set("gbtag", qa);
+          u.searchParams.set("cb", Date.now());
+          window.open(u.toString(), "_blank");
+        } catch {
+          toast("Некоректний URL");
+        }
+      };
+    }
+
+    // ---------- Load inventory + registry ----------
+    // У тебе кнопка називається Load inv → id="loadInv"
+    if ($("#loadInv")) {
+      $("#loadInv").onclick = loadInventoryAndRegistry;
+    }
+    // На всякий випадок підтримуємо старий id
+    if ($("#loadInventory")) {
+      $("#loadInventory").onclick = loadInventoryAndRegistry;
+    }
+
+    async function loadInventoryAndRegistry() {
+      const url = $("#siteUrl").value.trim();
+      if (!url) return toast("Вкажи URL сайту");
+
+      state.url = url;
+      try {
+        state.origin = new URL(url).origin;
+      } catch {
+        return toast("Некоректний URL");
+      }
+
+      $("#inventoryList").innerHTML =
+          '<div class="p-2 text-slate-500 text-xs">Loading inventory…</div>';
+      if ($("#diagFetch")) $("#diagFetch").textContent = new Date().toLocaleTimeString();
+
+      const pageKey = computeSitePage(); // host__page
+      if ($("#diagSitePage")) $("#diagSitePage").textContent = pageKey;
+
+      try {
+        // 1) live inventory
+        const liveRes = await fetch(
+            `/api/gb/dom-inventory?origin=${encodeURIComponent(state.origin)}`
+        );
+        const liveJson = await liveRes.json().catch(() => ({}));
+        const liveItems = liveJson.items || liveJson.inventory || [];
+        state.inventoryLive = liveItems;
+
+        // 2) registry map (вже у форматі { "site__page": { selector: key } })
+        const regRes = await fetch("/api/gb/dom-registry/map");
+        const regAll = await regRes.json().catch(() => ({}));
+        state.registryAll = regAll || {};
+        state.registryForPage = regAll[pageKey] || {};
+
+        // 3) merge by selector
+        const bySelector = new Map();
+
+        // з live
+        for (const it of liveItems) {
+          const sel = it.selector || it.sel;
+          if (!sel) continue;
+          const key = state.registryForPage[sel] || null;
+          bySelector.set(sel, {
+            selector: sel,
+            kind: it.kind || "el",
+            text: it.text || "",
+            key,
+            from: "live"
+          });
+        }
+
+        // з registry (додати, якщо ще нема)
+        for (const [sel, key] of Object.entries(state.registryForPage)) {
+          if (!bySelector.has(sel)) {
+            bySelector.set(sel, {
+              selector: sel,
+              kind: "el",
+              text: "(registered feature)",
+              key,
+              from: "registry"
+            });
+          } else {
+            const ex = bySelector.get(sel);
+            if (!ex.key) ex.key = key;
+          }
+        }
+
+        const merged = Array.from(bySelector.values()).sort(
+            (a, b) =>
+                (a.kind || "").localeCompare(b.kind || "") ||
+                (a.selector || "").localeCompare(b.selector || "")
+        );
+
+        state.inventoryMerged = merged;
+
+        if ($("#diagCount")) $("#diagCount").textContent = merged.length;
+        if ($("#registryMap"))
+          $("#registryMap").textContent = JSON.stringify(
+              state.registryForPage,
+              null,
+              2
+          );
+
+        renderInventory(merged);
+      } catch (e) {
+        console.error(e);
+        $("#inventoryList").innerHTML =
+            '<div class="p-2 text-rose-600 text-xs">Помилка завантаження інвентаря</div>';
+      }
+    }
+
+    // ---------- renderInventory ----------
+    function renderInventory(items) {
+      if (!items || !items.length) {
+        $("#inventoryList").innerHTML =
+            '<div class="p-2 text-slate-500 text-xs">Порожньо. Переконайся, що сторінка з ai-bridge.js вже відкривалась.</div>';
+        return;
+      }
+
+      $("#inventoryList").innerHTML = items
+      .map((it, i) => {
+        const tag =
+            it.key && it.from === "registry"
+                ? "GB"
+                : it.key
+                    ? "key"
+                    : it.from === "registry"
+                        ? "reg"
+                        : "live";
+        const badgeClass =
+            tag === "GB" || tag === "key"
+                ? "bg-violet-100 text-violet-700"
+                : tag === "reg"
+                    ? "bg-sky-100 text-sky-700"
+                    : "bg-slate-100 text-slate-600";
+
+        return `
+        <div class="py-1.5 flex items-start justify-between gap-2 border-b border-slate-50">
+          <div class="min-w-0">
+            <div class="flex items-center gap-1">
+              <span class="font-semibold text-[0.7rem] text-slate-800">${escHtml(
+            it.kind || "el"
+        )}</span>
+              <span class="px-1.5 rounded-full text-[0.55rem] ${badgeClass}">
+                ${tag}
+              </span>
+            </div>
+            <div class="mono text-[0.6rem] text-slate-500 break-all">${escHtml(
+            it.selector
+        )}</div>
+            <div class="text-[0.65rem] text-slate-700 truncate max-w-xs">${escHtml(
+            (it.text || "").toString()
+        )}</div>
+            ${
+            it.key
+                ? `<div class="text-[0.55rem] text-violet-600 break-all">key: ${escHtml(
+                    it.key
+                )}</div>`
+                : ""
+        }
+          </div>
+          <button class="btn btn-neutral text-[0.6rem]" data-idx="${i}">Use</button>
+        </div>`;
+      })
+      .join("");
+
+      $("#inventoryList")
+      .querySelectorAll("[data-idx]")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.getAttribute("data-idx"));
+          const it = state.inventoryMerged[idx];
+          if (!it) return;
+          applyItemToBuilder(it);
+        });
+      });
+    }
+
+    // ---------- Use item ----------
+    function applyItemToBuilder(it) {
+      if ($("#qbSelector")) $("#qbSelector").value = it.selector || "";
+
+      if ($("#opsJson")) {
+        try {
+          const current = JSON.parse($("#opsJson").value || "{}");
+          if (!current.ops) {
+            $("#opsJson").value = JSON.stringify(
+                {
+                  ops: [
+                    {
+                      selector: it.selector || "",
+                      action: "text",
+                      value: it.text || ""
+                    }
+                  ]
+                },
+                null,
+                2
+            );
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (it.key && $("#gbKey")) {
+        $("#gbKey").value = it.key;
+        toast("Використано існуючий feature key");
+      } else {
+        const key = suggestKeyFor(it.selector, it.text);
+        if ($("#gbKey")) $("#gbKey").value = key;
+        toast("Згенеровано ключ: " + key);
+      }
+    }
+
+    // ---------- Генерація/підбір ключа ----------
+    function suggestKeyFor(selector, text) {
+      // якщо вже є key для селектора в registry — повертаємо його
+      if (state.pageKey && state.registryAll[state.pageKey]) {
+        const existing = state.registryAll[state.pageKey][selector];
+        if (existing) return existing;
+      }
+
+      const pageKey = state.pageKey || computeSitePage();
+      const [siteId, pageId] = pageKey.split("__");
+      let slot = "";
+
+      if (text) slot = slug(text.slice(0, 24), "");
+      if (!slot) slot = "el_" + shortHash(selector || "");
+
+      return `${siteId}__${pageId}__${slot}`;
+    }
+
+    if ($("#suggestKey")) {
+      $("#suggestKey").onclick = () => {
+        const sel = $("#qbSelector").value.trim();
+        if (!sel) return toast("Спочатку вибери selector");
+        const txt = ($("#qbValue")?.value || "").trim();
+        const key = suggestKeyFor(sel, txt);
+        if ($("#gbKey")) $("#gbKey").value = key;
+        const sp = computeSitePage();
+        if ($("#diagSitePage")) $("#diagSitePage").textContent = sp;
+        toast("Ключ: " + key);
+      };
+    }
+
+    // ---------- Add op ----------
+    if ($("#addOp")) {
+      $("#addOp").onclick = () => {
+        const sel = $("#qbSelector").value.trim();
+        const kind = $("#qbKind").value;
+        const prop = $("#qbProp").value.trim();
+        const value = $("#qbValue").value;
+
+        if (!sel) return toast("Вкажи selector");
+
+        let root;
+        try {
+          root = JSON.parse($("#opsJson").value || "{}");
+        } catch {
+          root = {};
+        }
+        if (!root || typeof root !== "object") root = {};
+        if (!Array.isArray(root.ops)) root.ops = [];
+
+        const op = { selector: sel, action: kind };
+        if (kind === "text" || kind === "html:safe") {
+          op.value = value;
+        } else if (kind === "css") {
+          if (!prop) return toast("Вкажи css-властивість");
+          op.prop = prop;
+          op.value = value;
+        } else if (kind === "attr") {
+          if (!prop) return toast("Вкажи attr name");
+          op.name = prop;
+          op.value = value;
+        } else if (kind === "class:add" || kind === "class:remove") {
+          if (!value) return toast("Вкажи class");
+          op.value = value;
+        }
+
+        root.ops.push(op);
+        $("#opsJson").value = JSON.stringify(root, null, 2);
+        $("#qbValue").value = "";
+      };
+    }
+
+    // ---------- Preview local ----------
+    if ($("#previewLocal")) {
+      $("#previewLocal").onclick = () => {
+        let recipe;
+        try {
+          recipe = JSON.parse($("#opsJson").value || "{}");
+        } catch {
+          return toast("Невірний JSON в Ops");
+        }
+        if (!recipe || typeof recipe !== "object")
+          return toast("Порожній рецепт");
+
+        if (typeof window.gbPreview === "function") {
+          window.gbPreview(recipe);
+          toast("Preview застосовано в цій вкладці");
+        } else {
+          toast("gbPreview недоступний тут. Відкрий цільову сторінку з ai-bridge.js.");
+        }
+      };
+    }
+
+    // ---------- Add rule ----------
+    if ($("#addRule")) {
+      $("#addRule").onclick = () => {
+        const type = $("#ruleType").value;
+        const filter = $("#ruleFilter").value.trim();
+        const param = $("#ruleParam").value.trim();
+
+        let rules = [];
+        try {
+          rules = JSON.parse($("#rulesJson").value || "[]");
+        } catch {
+          rules = [];
+        }
+        if (!Array.isArray(rules)) rules = [];
+
+        const rule = { type };
+
+        if (type === "percent") {
+          const pct = parseFloat(param || "0") || 0;
+          rule.percent = pct;
+        } else if (type === "qa") {
+          const list = (param || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+          if (list.length) rule.whitelist = list;
+        }
+
+        if (filter) {
+          const when = {};
+          filter
+          .split(";")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((pair) => {
+            const m = pair.match(/^([^=]+)=(.+)$/);
+            if (!m) return;
+            const k = m[1].trim();
+            const v = m[2].trim();
+            when[k] = { op: "=", v };
+          });
+          rule.when = when;
+        }
+
+        rules.push(rule);
+        $("#rulesJson").value = JSON.stringify(rules, null, 2);
+        $("#ruleParam").value = "";
+      };
+    }
+
+    // ---------- Upsert feature ----------
+    if ($("#upsertFeature")) {
+      $("#upsertFeature").onclick = async () => {
+        const key = $("#gbKey").value.trim();
+        const env = $("#gbEnv").value || "production";
+        if (!key) return toast("Вкажи feature key");
+
+        let value, rules;
+        try {
+          value = JSON.parse($("#opsJson").value || '{"ops":[]}');
+        } catch {
+          return toast("Невірний JSON у Ops");
+        }
+        try {
+          rules = JSON.parse($("#rulesJson").value || "[]");
+        } catch {
+          rules = [];
+        }
+
+        const payload = { key, env, value, rules };
+
+        try {
+          const r = await fetch("/api/gb/upsert-feature", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...csrfHdr()
+            },
+            body: JSON.stringify(payload)
+          });
+          const text = await r.text();
+          if (!r.ok) {
+            console.error("Upsert error", r.status, text);
+            if ($("#diagMsg"))
+              $("#diagMsg").textContent = "Upsert error " + r.status;
+            toast("Upsert error: " + (text || r.status));
+            return;
+          }
+          if ($("#diagEnv")) $("#diagEnv").textContent = env;
+          if ($("#diagMsg")) $("#diagMsg").textContent = "OK: " + key;
+          toast("Feature оновлено в GrowthBook: " + key + " (" + env + ")");
+          // оновлюємо інвентар + registry, щоб побачити новий key
+          loadInventoryAndRegistry();
+        } catch (e) {
+          console.error(e);
+          if ($("#diagMsg")) $("#diagMsg").textContent = "Network error";
+          toast("Помилка мережі при upsert");
+        }
+      };
+    }
+
+    // ---------- Reload registry map вручну ----------
+    if ($("#reloadMap")) {
+      $("#reloadMap").onclick = async () => {
+        const pageKey = computeSitePage();
+        $("#registryMap").textContent = "Loading…";
+        try {
+          const r = await fetch("/api/gb/dom-registry/map");
+          const data = await r.json();
+          state.registryAll = data || {};
+          state.registryForPage = (data && data[pageKey]) || {};
+          $("#registryMap").textContent = JSON.stringify(
+              state.registryForPage,
+              null,
+              2
+          );
+          toast("Registry reloaded");
+        } catch (e) {
+          console.error(e);
+          $("#registryMap").textContent = "Error loading map";
+        }
+      };
+    }
+
+    // ---------- AI agent chat (uses existing /api/ai/chat + /api/ai/reset) ----------
+    function initAiChat() {
+      const memoryInput = $("#aiMemoryId");
+      const msgInput = $("#aiMessage");
+      const replyEl = $("#aiReply");
+      const statusEl = $("#aiStatus");
+      const sendBtn = $("#aiSend");
+      const resetBtn = $("#aiReset");
+
+      if (!sendBtn || !msgInput || !replyEl) return;
+
+      // дефолт memoryId беремо з qaId, якщо є
+      const qa = localStorage.getItem("qaId");
+      if (memoryInput && qa && !memoryInput.value) {
+        memoryInput.value = qa; // наприклад "qa-vitaliy"
+      }
+
+      async function send() {
+        const message = (msgInput.value || "").trim();
+        if (!message) return toast("Введи повідомлення");
+
+        const memoryId = (memoryInput?.value || "").trim();
+
+        sendBtn.disabled = true;
+        sendBtn.classList.add("opacity-60");
+        if (statusEl) statusEl.textContent = "Thinking…";
+
+        try {
+          // Якщо ти додаси memoryId в ChatRequest (рекомендовано) — тоді відправляємо його.
+          // Якщо НЕ додаси — просто прибери memoryId з body.
+          const body = memoryId ? { message, memoryId } : { message };
+
+          const res = await fetch("/api/ai/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...csrfHdr()
+            },
+            body: JSON.stringify(body)
+          });
+
+          if (!res.ok) {
+            const t = await res.text().catch(() => "");
+            if (statusEl) statusEl.textContent = "Error " + res.status;
+            return toast("AI error: " + (t || res.status));
+          }
+
+          const json = await res.json().catch(() => ({}));
+          replyEl.textContent = json.reply || "[empty reply]";
+          if (statusEl) statusEl.textContent = "OK";
+        } catch (e) {
+          console.error(e);
+          if (statusEl) statusEl.textContent = "Network error";
+          toast("Помилка мережі");
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.classList.remove("opacity-60");
+        }
+      }
+
+      async function reset() {
+        try {
+          const res = await fetch("/api/ai/reset", {
+            method: "POST",
+            headers: { ...csrfHdr() }
+          });
+          if (!res.ok) return toast("Reset error: " + res.status);
+          toast("Памʼять скинуто");
+          if (statusEl) statusEl.textContent = "Memory reset";
+          if (replyEl) replyEl.textContent = "—";
+        } catch (e) {
+          console.error(e);
+          toast("Помилка reset");
+        }
+      }
+
+      sendBtn.onclick = send;
+      if (resetBtn) resetBtn.onclick = reset;
+
+      msgInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          send();
+        }
+      });
+    }
+
+    // викликати ініціалізацію
+    initAiChat();
+
+  })();
+</script>
+
+
+
+</body>
+</html>
