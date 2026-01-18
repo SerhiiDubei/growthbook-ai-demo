@@ -1,6 +1,7 @@
-// /static/js/ai-bridge.js — DOM-міст для GrowthBook (inventory + DOM-op + tracking)
+// /static/js/ai-bridge.js — DOM bridge for GrowthBook (inventory + DOM-op + tracking)
+// Variant B: backend is canonical featureKey generator. Frontend does NOT generate feature keys.
 (function () {
-  // ---------- КОНФІГ / СТАН ----------
+  // ---------- CONFIG / STATE ----------
 
   const ALLOWED_CSS_PROPS = new Set([
     "fontSize", "fontWeight", "lineHeight",
@@ -22,105 +23,12 @@
       window.GB_BRIDGE_ORIGIN ||
       ((document.currentScript && new URL(document.currentScript.src).origin) || location.origin);
 
-  // вже “побачені” фічі (щоб не слати view по 10 разів)
+  // already "viewed" feature keys (avoid duplicate view events)
   const VIEWED_FEATURES = new Set();
-  // елементи, на які вже повісили click-listener
+  // elements that already have click listener bound
   const CLICK_BOUND = new WeakSet();
 
-  // ---------- ID-шки сайту / сторінки ----------
-
-  // ---------- SCROLL TRACKING ----------
-
-  const SCROLL_MARKS = [25, 50, 75, 100];
-  let scrollTrackedMarks = new Set();
-
-  function setupScrollTracking(sessTag, pageUrl) {
-    if (window.__gbScrollTrackingBound) return;
-    window.__gbScrollTrackingBound = true;
-
-    function handler() {
-      const doc = document.documentElement || document.body;
-      const scrollTop = doc.scrollTop || document.body.scrollTop || 0;
-      const scrollHeight = (doc.scrollHeight || 0) - (doc.clientHeight || 0);
-      if (scrollHeight <= 0) return;
-
-      const percent = Math.round((scrollTop / scrollHeight) * 100);
-
-      SCROLL_MARKS.forEach((m) => {
-        if (percent >= m && !scrollTrackedMarks.has(m)) {
-          scrollTrackedMarks.add(m);
-
-          sendTrackEvent({
-            featureKey: FEATURE_PREFIX + "_page",
-            variation: "A",
-            sessionTag: sessTag || getSessionTagFromCookie(),
-            page: pageUrl || location.href,
-            action: "scroll",
-            meta: {
-              source: "dom-bridge",
-              mark: m
-            }
-          });
-        }
-      });
-
-      if (scrollTrackedMarks.size === SCROLL_MARKS.length) {
-        window.removeEventListener("scroll", handler);
-      }
-    }
-
-    window.addEventListener("scroll", handler, { passive: true });
-  }
-
-
-  (function () {
-    // ---------- Сесія ----------
-    function getSessionId() {
-      const KEY = "gb_ai_bridge_session";
-      let id = localStorage.getItem(KEY);
-      if (!id) {
-        id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "-" + Math.random());
-        localStorage.setItem(KEY, id);
-      }
-      return id;
-    }
-
-    const sessionId = getSessionId();
-
-    async function postJson(url, body) {
-      try {
-        await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
-      } catch (err) {
-        console.warn("AI-bridge POST error", err);
-      }
-    }
-
-
-    // ---------- 2) Кліки ----------
-    document.addEventListener("click", function (e) {
-      const el = e.target.closest("button, a");
-      if (!el) return;
-
-      const featureKey = el.dataset.gbFeature;
-      const variant = el.dataset.gbVariant;
-      const selector = el.tagName.toLowerCase() + (el.id ? "#" + el.id : "");
-
-      postJson("/api/gb/dom-events", {
-        sessionId,
-        url: location.href,
-        eventType: "CLICK",
-        timestamp: Date.now(),
-        selector,
-        featureKey,
-        variant
-      });
-    }, true);
-  })();
-
+  // ---------- SITE / PAGE IDS (must match backend DomPageKeyUtil logic) ----------
 
   function slug(str, fallback) {
     if (!str) return fallback;
@@ -159,51 +67,26 @@
 
   const SITE_ID = getSiteId();
   const PAGE_ID = getPageId();
+  // IMPORTANT: must match backend feature key prefixing scheme
   const FEATURE_PREFIX = SITE_ID + "__" + PAGE_ID + "__";
 
-  function shortHash(str) {
-    // FNV-1a 32-bit (швидко і стабільно)
-    let h = 2166136261;
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 16777619);
+  // ---------- sessionTag from ?gbtag= into cookie ----------
+
+  (function captureGbTagFromUrl() {
+    const m = new URLSearchParams(location.search).get("gbtag");
+    if (m) {
+      document.cookie = "gb_tag=" + m + "; path=/; max-age=" + 7 * 24 * 60 * 60;
     }
-    return ("00000000" + (h >>> 0).toString(16)).slice(-8);
-  }
-
-  function slugPart(str, fallback) {
-    if (!str) return fallback;
-    return String(str)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 80) || fallback;
-  }
-
-  function kindPrefix(kind) {
-    // твій стиль: cta / h / img / link ...
-    switch (kind) {
-      case "cta": return "cta";
-      case "heading": return "h";
-      case "link": return "l";
-      case "image": return "img";
-      default: return "x";
-    }
-  }
-
-  function makeFeatureKey(kind, selector) {
-    const body = kindPrefix(kind) + "__" + slugPart(selector, "sel");
-    return FEATURE_PREFIX + body + "_" + shortHash(selector);
-  }
-
-
-  // ---------- sessionTag / tracking helpers ----------
+  })();
 
   function getSessionTagFromCookie() {
     const c = document.cookie.split("; ").find(r => r.startsWith("gb_tag="));
     return c ? c.split("=")[1] : "";
   }
+
+  const sessionTag = getSessionTagFromCookie();
+
+  // ---------- TRACKING ----------
 
   async function sendTrackEvent(payload) {
     try {
@@ -222,7 +105,7 @@
     }
   }
 
-  // ---------- ХЕЛПЕРИ DOM / inventory ----------
+  // ---------- DOM / INVENTORY HELPERS ----------
 
   function uniqueSelector(el) {
     if (!el || el.nodeType !== 1) return null;
@@ -249,9 +132,7 @@
 
       const parent = cur.parentElement;
       if (parent) {
-        const same = Array.from(parent.children).filter(
-            ch => ch.tagName === cur.tagName
-        );
+        const same = Array.from(parent.children).filter(ch => ch.tagName === cur.tagName);
         if (same.length > 1) {
           part += `:nth-of-type(${same.indexOf(cur) + 1})`;
         }
@@ -267,25 +148,20 @@
   function collectInventory() {
     const items = [];
 
-    // Заголовки
-    document
-    .querySelectorAll("h1, h2, h3, [role='heading']")
-    .forEach(el => {
+    // Headings
+    document.querySelectorAll("h1, h2, h3, [role='heading']").forEach(el => {
       const selector = uniqueSelector(el);
       if (!selector) return;
 
       const text = (el.textContent || "").trim().slice(0, 140);
-      const kind = "heading";
-
       items.push({
-        kind,
+        kind: "heading",
         text,
-        selector,
-        featureKey: makeFeatureKey(kind, selector)
+        selector
       });
     });
 
-    // CTA / кнопки / лінки
+    // CTA / buttons / links
     document
     .querySelectorAll("button, [role='button'], a, a.btn, a.button, a[class*='btn'], .btn, .btn-cta")
     .forEach(el => {
@@ -295,26 +171,19 @@
       const label = (el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 140);
       const href = (el.tagName === "A" ? (el.getAttribute("href") || "") : "");
 
-      const kind = "cta";
-
       items.push({
-        kind,
+        kind: "cta",
         text: label,
         href,
-        selector,
-        featureKey: makeFeatureKey(kind, selector)
+        selector
       });
     });
 
-    // Унікалізація по selector (як і було)
+    // Uniq by selector
     const uniq = new Map();
-    items.forEach(it => {
-      uniq.set(it.selector, it);
-    });
-
+    items.forEach(it => uniq.set(it.selector, it));
     return Array.from(uniq.values());
   }
-
 
   async function sendInventory(payload) {
     try {
@@ -324,6 +193,7 @@
         credentials: "omit",
         body: JSON.stringify(payload)
       });
+
       if (!r.ok) {
         const t = await r.text().catch(() => "");
         console.debug("[GB-bridge] inventory non-200:", r.status, t);
@@ -342,19 +212,23 @@
     }
   }
 
+  // ---------- FEATURE VALUE PARSING + OP NORMALIZATION ----------
+
   function normalizeOp(rawOp) {
     if (!rawOp) return null;
     const op = { ...rawOp };
 
+    // legacy compat: kind -> action
     if (!op.action && op.kind) {
       switch (op.kind) {
         case "text": op.action = "text"; break;
         case "html": op.action = "html:safe"; break;
-        case "css":  op.action = "css";  break;
+        case "css":  op.action = "css"; break;
         case "attr": op.action = "attr"; break;
         default:     op.action = op.kind;
       }
     }
+    // legacy compat: sel -> selector, prop/name mapping
     if (!op.selector && op.sel) op.selector = op.sel;
     if (!op.name && op.prop) op.name = op.prop;
     if (!op.prop && op.name && op.action === "css") op.prop = op.name;
@@ -376,13 +250,12 @@
     return null;
   }
 
-  // ---------- Визначення реального GrowthBook ----------
+  // ---------- GrowthBook instance detection ----------
 
   function isRealGrowthBook(gb) {
     return !!gb &&
         typeof gb.getFeatureValue === "function" &&
-        (typeof gb.getAllFeatures === "function" ||
-            typeof gb.getFeatures === "function");
+        (typeof gb.getAllFeatures === "function" || typeof gb.getFeatures === "function");
   }
 
   function getGrowthBookInstance() {
@@ -401,7 +274,7 @@
     return null;
   }
 
-  // ---------- Застосування однієї op з контекстом фічі ----------
+  // ---------- Apply a single op (with tracking context) ----------
 
   function makeOpApplier(featureKey, sessTag, pageUrl) {
     return function (rawOp) {
@@ -409,26 +282,20 @@
       if (!op) return;
 
       try {
-        // vars без DOM-селекторів
+        // vars op (no selector)
         if (op.action === "vars" && op.vars) {
           applyCssVars(op.vars);
           return;
         }
 
-        const nodes = op.selector
-            ? document.querySelectorAll(op.selector)
-            : [];
+        const nodes = op.selector ? document.querySelectorAll(op.selector) : [];
 
         const each = (fn) =>
             nodes.forEach((el) => {
-              try {
-                fn(el);
-              } catch (e) {
-                console.warn(e);
-              }
+              try { fn(el); } catch (e) { console.warn(e); }
             });
 
-        // CLICK-трекінг (тільки коли є featureKey + selector)
+        // click tracking (only if featureKey + selector + nodes found)
         if (featureKey && op.selector && nodes.length) {
           nodes.forEach(el => {
             if (CLICK_BOUND.has(el)) return;
@@ -439,10 +306,10 @@
               const page = pageUrl || location.href;
 
               sendTrackEvent({
-                featureKey: featureKey,
-                variation: "A",   // поки одна варіація
+                featureKey,
+                variation: "A",
                 sessionTag: tag,
-                page: page,
+                page,
                 action: "click",
                 meta: {
                   source: "dom-bridge",
@@ -454,33 +321,37 @@
           });
         }
 
-        // Власне DOM-операції
+        // DOM operations
         switch (op.action) {
           case "text":
             each((el) => (el.textContent = String(op.value ?? "")));
             break;
+
           case "html:safe":
             each((el) => {
               const html = String(op.value ?? "");
-              el.innerHTML = window.DOMPurify
-                  ? DOMPurify.sanitize(html)
-                  : html;
+              el.innerHTML = window.DOMPurify ? DOMPurify.sanitize(html) : html;
             });
             break;
+
           case "css":
             if (!op.prop || !ALLOWED_CSS_PROPS.has(op.prop)) return;
             each((el) => (el.style[op.prop] = String(op.value ?? "")));
             break;
+
           case "attr":
             if (!op.name || !ALLOWED_ATTRS.has(op.name)) return;
             each((el) => el.setAttribute(op.name, String(op.value ?? "")));
             break;
+
           case "class:add":
             each((el) => el.classList.add(String(op.value ?? "")));
             break;
+
           case "class:remove":
             each((el) => el.classList.remove(String(op.value ?? "")));
             break;
+
           case "image":
             each((el) => {
               if (el.tagName === "IMG" && op.src) {
@@ -488,6 +359,7 @@
               }
             });
             break;
+
           case "remove":
             each((el) => el.remove());
             break;
@@ -498,13 +370,11 @@
     };
   }
 
-  // ---------- Хуки до GrowthBook ----------
+  // ---------- Hook GrowthBook updates ----------
 
   function hookGrowthBook(gb) {
     if (!gb || gb.__gbDomBridgeHooked) {
-      if (gb && gb.__gbDomBridgeHooked) {
-        console.debug("[GB-bridge] GrowthBook already hooked");
-      }
+      if (gb && gb.__gbDomBridgeHooked) console.debug("[GB-bridge] GrowthBook already hooked");
       return;
     }
     gb.__gbDomBridgeHooked = true;
@@ -572,7 +442,7 @@
     })();
   }
 
-  // ---------- Застосування фіч + TRACK ----------
+  // ---------- Apply features + send "view" once ----------
 
   function applyDomFeatures() {
     const gb = getGrowthBookInstance();
@@ -596,12 +466,7 @@
       return;
     }
 
-    console.info(
-        "[GB-bridge] applying",
-        keys.length,
-        "features with prefix",
-        FEATURE_PREFIX
-    );
+    console.info("[GB-bridge] applying", keys.length, "features with prefix", FEATURE_PREFIX);
 
     const currentSessionTag = getSessionTagFromCookie() || "auto";
     const pageUrl = location.href;
@@ -610,8 +475,7 @@
       let v =
           typeof gb.getFeatureValue === "function"
               ? gb.getFeatureValue(key, null)
-              : (features[key] &&
-                  (features[key].defaultValue || features[key].default));
+              : (features[key] && (features[key].defaultValue || features[key].default));
 
       const val = parseFeatureValue(v);
       if (!val) {
@@ -628,7 +492,6 @@
         val.ops.forEach(applyOp);
       }
 
-      // TRACK «view» (один раз на фічу)
       if (!VIEWED_FEATURES.has(key)) {
         VIEWED_FEATURES.add(key);
 
@@ -647,36 +510,20 @@
     });
   }
 
-  // ---------- ПУБЛІЧНИЙ ХЕЛПЕР ДЛЯ QUEUE ----------
+  // ---------- Public helper for manual apply ----------
 
   window.gbDomBridgeApply = function () {
     try {
       console.debug("[GB-bridge] gbDomBridgeApply called");
       const gb = getGrowthBookInstance();
-      if (gb) {
-        hookGrowthBook(gb);
-      } else {
-        console.debug("[GB-bridge] gbDomBridgeApply: no GB instance yet");
-      }
+      if (gb) hookGrowthBook(gb);
       applyDomFeatures();
     } catch (e) {
       console.warn("[GB-bridge] gbDomBridgeApply error", e);
     }
   };
 
-  // ---------- sessionTag з ?gbtag= ----------
-
-  (function captureGbTagFromUrl() {
-    const m = new URLSearchParams(location.search).get("gbtag");
-    if (m) {
-      document.cookie =
-          "gb_tag=" + m + "; path=/; max-age=" + 7 * 24 * 60 * 60;
-    }
-  })();
-
-  const sessionTag = getSessionTagFromCookie();
-
-  // ---------- ЗАПУСК ----------
+  // ---------- Init ----------
 
   function init() {
     const inv = collectInventory();
@@ -685,6 +532,7 @@
     } catch (_) { /* ignore */ }
 
     window.dispatchEvent(new CustomEvent("gb:inventory", { detail: inv }));
+
     console.info("[GB-bridge] sending inventory", inv);
     sendInventory({
       url: location.href,
@@ -695,9 +543,7 @@
     const gbNow = getGrowthBookInstance();
     if (gbNow && typeof gbNow.setAttributes === "function") {
       try {
-        const base =
-            (typeof gbNow.getAttributes === "function" &&
-                gbNow.getAttributes()) || {};
+        const base = (typeof gbNow.getAttributes === "function" && gbNow.getAttributes()) || {};
         gbNow.setAttributes({
           ...base,
           url: location.href,
@@ -720,14 +566,13 @@
     init();
   }
 
-  // ---------- ПУБЛІЧНІ API ДЛЯ КОНСОЛІ ----------
+  // ---------- Public API for console ----------
 
   window.gbPreview = function (recipe) {
     try {
       if (!recipe) return;
       if (recipe.vars) applyCssVars(recipe.vars);
 
-      // тут без трекінгу: featureKey=null → кліки не логуються
       const applyOp = makeOpApplier(null, null, null);
       if (Array.isArray(recipe.ops)) recipe.ops.forEach(applyOp);
 

@@ -1,6 +1,7 @@
 package com.example.gb.ai.tools;
 
 import com.example.gb.repository.DomInventoryLatestRepo;
+import com.example.gb.util.DomPageKeyUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
@@ -19,7 +20,6 @@ public class DomInventoryTools {
 
     private final DomInventoryLatestRepo latestRepo;
     private final ObjectMapper objectMapper;
-    private final com.example.gb.service.GbAdminService gbAdmin;
 
     // ---------- PAGE HELPERS ----------
 
@@ -42,7 +42,22 @@ public class DomInventoryTools {
     }
 
     @Tool("""
-          Resolve pageKey from host, port, and pageId.
+          Resolve pageKey from a full pageUrl using backend logic (canonical).
+          Example: http://localhost:8080/ -> localhost_8080__home
+          """)
+    public String resolvePageKeyFromUrl(@P("Page URL") String pageUrl) {
+        try {
+            if (pageUrl == null || pageUrl.isBlank()) {
+                throw new IllegalArgumentException("pageUrl is blank");
+            }
+            return DomPageKeyUtil.pageKeyFromUrl(pageUrl);
+        } catch (Exception e) {
+            return "ERROR: " + safeMsg(e);
+        }
+    }
+
+    @Tool("""
+          Resolve pageKey from host, port, and pageId (manual helper).
           Example: host=localhost port=8080 pageId=home -> localhost_8080__home
           """)
     public String resolvePageKey(
@@ -138,14 +153,12 @@ public class DomInventoryTools {
             @P(value = "Text contains filter (optional)", required = false) String textContains
     ) {
         try {
-            // беремо інвентар
             var e = latestRepo.findByPageKey(pageKey)
                     .orElseThrow(() -> new IllegalArgumentException("No inventory for pageKey=" + pageKey));
 
             String k = norm(kindHint);
             String q = norm(textContains);
 
-            // парсимо і конвертимо в прості мапи
             List<ItemJson> parsed = parseItems(e.getItemsJson());
 
             var candidates = parsed.stream()
@@ -202,18 +215,6 @@ public class DomInventoryTools {
         }
     }
 
-    @Tool("Ensure a JSON feature exists (creates skeleton if missing). Returns OK or ERROR: ...")
-    public String ensureFeatureExists(@P("Feature key") String featureId) {
-        try {
-            gbAdmin.ensureJsonFeatureSkeleton(featureId)
-                    .blockOptional()
-                    .orElse(null);
-            return "OK";
-        } catch (Exception e) {
-            return "ERROR: " + safeMsg(e);
-        }
-    }
-
     // ---------- Parsing helpers ----------
 
     private List<ItemJson> parseItems(String itemsJson) {
@@ -250,7 +251,7 @@ public class DomInventoryTools {
         return (m == null || m.isBlank()) ? e.getClass().getSimpleName() : m;
     }
 
-    // DTO for JSON parsing (items_json)
+    // DTO for JSON parsing (itemsJson)
     public static class ItemJson {
         private String kind;
         private String text;

@@ -1,14 +1,12 @@
 package com.example.gb.controller;
 
 import com.example.gb.service.DomInventoryService;
-import com.example.gb.service.DomRegistryService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,19 +18,20 @@ import java.util.Optional;
 public class DomInventoryController {
 
     private final DomInventoryService domInventoryService;
-    private final DomRegistryService registry;
 
     @PostMapping
     public ResponseEntity<Void> save(@RequestBody DomInventory payload) {
 
+        String url = Optional.ofNullable(payload.getUrl()).orElse("");
         var items = Optional.ofNullable(payload.getInventory()).orElseGet(List::of);
 
-        var res = domInventoryService.saveFromPageUrl(payload.getUrl(), items);
-        log.info("📥 dom-inventory POST url={} inventoryItems={} sampleKey={}",
-                payload.getUrl(), items.size(),
-                items.isEmpty() ? "-" : items.get(0).getFeatureKey());
+        var res = domInventoryService.saveFromPageUrl(url, items);
 
-        registry.syncAsync(res.origin(), items);
+        // ВАЖЛИВО: items тут "сирі" (з bridge), тому featureKey може бути порожнім/не канонічним.
+        // Канонічні featureKey вже присвоєні всередині DomInventoryService під час normalize().
+        log.info("📥 dom-inventory POST url={} inventoryItems={} savedPageKey={} hash={}",
+                url, items.size(), res.pageKey(), res.hash());
+
         return ResponseEntity.accepted().build();
     }
 
@@ -41,7 +40,6 @@ public class DomInventoryController {
         var items = domInventoryService.getLatestByOrigin(origin);
         return ResponseEntity.ok(Map.of("origin", origin, "items", items));
     }
-
 
     // ---- прості моделі для інвентаря ----
     @Data
@@ -52,9 +50,9 @@ public class DomInventoryController {
 
     @Data
     public static class Item {
-        private String selector; // CSS-селектор або data-gb-key
+        private String selector; // CSS selector
         private String kind;     // heading/cta/...
-        private String text;     // поточний текст (для прев’ю)
-        private String featureKey;
+        private String text;     // current text
+        private String featureKey; // may be ignored by backend
     }
 }
