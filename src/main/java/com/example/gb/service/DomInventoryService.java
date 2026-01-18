@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
@@ -21,17 +22,15 @@ public class DomInventoryService {
 
     private final DomInventoryRepository repo;
     private final ObjectMapper objectMapper;
+    private final DomRegistryService domRegistry; // ✅ add
 
-    /**
-     * Зберігає "latest snapshot" для pageKey.
-     * Якщо items не змінились (hash той самий) — оновлюємо тільки lastSeenAt.
-     */
     public SaveResult saveFromPageUrl(String pageUrl, List<Item> items) {
 
         String origin = DomPageKeyUtil.originFromUrl(pageUrl);
         String pageKey = DomPageKeyUtil.pageKeyFromUrl(pageUrl);
 
-        List<Item> safeItems = normalize(items);
+        // ✅ важливо: нормалізуємо і ПРИСВОЮЄМО featureKey з бекенда
+        List<Item> safeItems = normalize(pageUrl, items);
 
         String json = toStableJson(safeItems);
         String hash = sha256(json);
@@ -50,12 +49,10 @@ public class DomInventoryService {
                         existing.setItemsJson(json);
                         existing.setItemsHash(hash);
                         log.info("📦 DomInventory changed: pageKey={}, items={}, hash={}", pageKey, safeItems.size(), shortHash(hash));
-                        return existing;
                     } else {
-                        // важливо: не перезаписуємо itemsJson зайвий раз
                         log.debug("📦 DomInventory unchanged: pageKey={}, items={}, hash={}", pageKey, safeItems.size(), shortHash(hash));
-                        return existing;
                     }
+                    return existing;
                 })
                 .orElseGet(() -> {
                     DomInventoryLatest created = new DomInventoryLatest();
@@ -72,22 +69,18 @@ public class DomInventoryService {
 
         DomInventoryLatest saved = repo.save(entity);
 
+        // ✅ registry sync тепер теж має бачити ТІЛЬКИ бекендові ключі (в items)
+        domRegistry.syncAsync(pageUrl, safeItems);
+
         return new SaveResult(pageKey, origin, safeItems.size(), saved.getItemsHash());
     }
 
-    /**
-     * Для консолі: показати останній інвентар по origin
-     * (якщо ти поки що не передаєш pageKey у GET).
-     */
     public List<Item> getLatestByOrigin(String origin) {
         return repo.findTopByOriginOrderByLastSeenAtDesc(origin)
                 .map(this::fromJson)
                 .orElseGet(List::of);
     }
 
-    /**
-     * Для агента: отримати інвентар конкретної сторінки
-     */
     public List<Item> getByPageUrl(String pageUrl) {
         String pageKey = DomPageKeyUtil.pageKeyFromUrl(pageUrl);
         return repo.findByPageKey(pageKey)
@@ -97,10 +90,9 @@ public class DomInventoryService {
 
     // ---------------- helpers ----------------
 
-    private List<Item> normalize(List<Item> items) {
+    private List<Item> normalize(String pageUrl, List<Item> items) {
         if (items == null) return List.of();
 
-        // 1) прибрати null/порожні селектори
         List<Item> cleaned = new ArrayList<>();
         for (Item it : items) {
             if (it == null) continue;
@@ -110,11 +102,17 @@ public class DomInventoryService {
             x.setSelector(it.getSelector().trim());
             x.setKind(it.getKind() == null ? null : it.getKind().trim());
             x.setText(it.getText() == null ? null : trimMax(it.getText().trim(), 200));
-            x.setFeatureKey(it.getFeatureKey() == null ? null : it.getFeatureKey().trim());
+
+            // ✅ КЛЮЧОВЕ: featureKey НЕ беремо з bridge
+            // Генеруємо канонічно з одного місця (DomRegistryService)
+            String selector = x.getSelector();
+            String kind = x.getKind();
+            String fk = domRegistry.getOrCreateFeatureKey(pageUrl, kind, selector);
+            x.setFeatureKey(fk);
+
             cleaned.add(x);
         }
 
-        // 2) стабільне сортування (щоб hash не “плавав”)
         cleaned.sort(Comparator
                 .comparing((Item i) -> safe(i.getKind()))
                 .thenComparing(i -> safe(i.getSelector()))
@@ -136,8 +134,6 @@ public class DomInventoryService {
     private List<Item> fromJson(DomInventoryLatest e) {
         try {
             if (e.getItemsJson() == null || e.getItemsJson().isBlank()) return List.of();
-            // Jackson сам відновить List<Item>, якщо Item - static class в контролері.
-            // Якщо будуть проблеми — винесемо Item в окремий DTO-клас.
             return Arrays.asList(objectMapper.readValue(e.getItemsJson(), Item[].class));
         } catch (Exception ex) {
             log.warn("Failed to parse itemsJson for pageKey={}: {}", e.getPageKey(), ex.getMessage());
