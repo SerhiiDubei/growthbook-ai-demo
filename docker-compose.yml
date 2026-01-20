@@ -1,6 +1,5 @@
 services:
   app:
-    SPRING_PROFILES_ACTIVE: dev
     build: .
     container_name: growthbook-ai-demo
     ports:
@@ -11,7 +10,14 @@ services:
       - mongo
       - events-postgres        # ⬅ додали залежність від Postgres
     networks: [appnet]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
   growthbook:
     image: growthbook/growthbook
     container_name: growthbook
@@ -30,12 +36,24 @@ services:
       - mongo
     networks: [appnet]
 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
   mongo:
     image: mongo:6
     container_name: mongo
     volumes:
       - mongo_data:/data/db
     networks: [appnet]
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # 🆕 Postgres для подій/аналітики
   events-postgres:
@@ -51,6 +69,12 @@ services:
     volumes:
       - events_pg_data:/var/lib/postgresql/data
     networks: [appnet]
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 networks:
   appnet:
