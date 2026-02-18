@@ -22,6 +22,13 @@ public class TrackEventRequestDTO {
     /** Подія: "view", "click", "conversion", "custom" і т.д. */
     private String action;
 
+    /**
+     * A/B variant key assigned by the bridge (e.g. "control", "treatment").
+     * Sent back from /bridge/recipe response and forwarded here by ai-bridge.js.
+     * Null for events without A/B context.
+     */
+    private String variantKey;
+
     /** Додаткові дані (будь-який JSON ↔ Map) */
     private Map<String, Object> meta;
 }

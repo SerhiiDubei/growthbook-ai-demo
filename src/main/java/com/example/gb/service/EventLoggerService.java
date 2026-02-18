@@ -2,6 +2,7 @@ package com.example.gb.service;
 
 import com.example.gb.model.ExperimentEvent;
 import com.example.gb.repository.ExperimentEventRepository;
+import com.example.gb.repository.ExperimentRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import java.util.Map;
 public class EventLoggerService {
 
     private final ExperimentEventRepository eventRepo;
+    private final ExperimentRepository experimentRepo;
     private final ObjectMapper objectMapper;
 
     /**
@@ -38,21 +40,43 @@ public class EventLoggerService {
             String action,
             String metaJson
     ) {
+        logEvent(featureKey, variation, sessionTag, page, action, null, metaJson);
+    }
+
+    /**
+     * Full method with variantKey — primary path for A/B tracking.
+     */
+    @Transactional
+    public void logEvent(
+            String featureKey,
+            String variation,
+            String sessionTag,
+            String page,
+            String action,
+            String variantKey,
+            String metaJson
+    ) {
         try {
             ExperimentEvent e = new ExperimentEvent();
+
+            experimentRepo.findByFeatureKey(featureKey)
+                    .ifPresent(e::setExperiment);
+
             e.setFeatureKey(featureKey);
             e.setVariation(variation);
             e.setSessionTag(sessionTag);
             e.setPage(page);
             e.setAction(action);
+            e.setVariantKey(variantKey);
             e.setMetaJson(metaJson);
 
             ExperimentEvent saved = eventRepo.save(e);
 
-            log.debug("📊 [EventLogger] saved event id={} feature={} variation={} action={}",
-                    saved.getId(), featureKey, variation, action);
+            log.debug("📊 [EventLogger] saved event id={} feature={} experimentId={} variant={} variation={} action={}",
+                    saved.getId(), featureKey,
+                    saved.getExperiment() != null ? saved.getExperiment().getId() : null,
+                    variantKey, variation, action);
         } catch (Exception ex) {
-            // не кидаємо далі, щоб аналітика не ламала основний флоу
             log.error("❌ [EventLogger] failed to save event feature={} action={} : {}",
                     featureKey, action, ex.getMessage(), ex);
         }
@@ -77,6 +101,19 @@ public class EventLoggerService {
             String action,
             Map<String, Object> meta
     ) {
+        logEvent(featureKey, variation, sessionTag, page, action, null, meta);
+    }
+
+    @Transactional
+    public void logEvent(
+            String featureKey,
+            String variation,
+            String sessionTag,
+            String page,
+            String action,
+            String variantKey,
+            Map<String, Object> meta
+    ) {
         String json = null;
         if (meta != null && !meta.isEmpty()) {
             try {
@@ -86,7 +123,7 @@ public class EventLoggerService {
                         meta, e.getMessage());
             }
         }
-        logEvent(featureKey, variation, sessionTag, page, action, json);
+        logEvent(featureKey, variation, sessionTag, page, action, variantKey, json);
     }
 
     /**
