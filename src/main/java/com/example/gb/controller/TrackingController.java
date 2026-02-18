@@ -41,6 +41,7 @@ public class TrackingController {
                 req.getSessionTag(),
                 req.getPage(),
                 action,
+                req.getVariantKey(),
                 req.getMeta()
         );
 

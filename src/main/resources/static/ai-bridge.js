@@ -27,6 +27,10 @@
   const VIEWED_FEATURES = new Set();
   // elements that already have click listener bound
   const CLICK_BOUND = new WeakSet();
+  // variant assigned by server per featureKey (populated by applyAbBridgeRecipes)
+  const FEATURE_VARIANTS = {};
+  // canonical featureKeys returned by backend after inventory POST
+  const KNOWN_FEATURE_KEYS = [];
 
   // ---------- SITE / PAGE IDS (must match backend DomPageKeyUtil logic) ----------
 
@@ -70,8 +74,9 @@
   // IMPORTANT: must match backend feature key prefixing scheme
   const FEATURE_PREFIX = SITE_ID + "__" + PAGE_ID + "__";
 
-  // ---------- sessionTag from ?gbtag= into cookie ----------
+  // ---------- sessionTag resolution (universal for any visitor) ----------
 
+  // 1) Capture explicit ?gbtag= from URL into persistent cookie
   (function captureGbTagFromUrl() {
     const m = new URLSearchParams(location.search).get("gbtag");
     if (m) {
@@ -79,12 +84,31 @@
     }
   })();
 
-  function getSessionTagFromCookie() {
-    const c = document.cookie.split("; ").find(r => r.startsWith("gb_tag="));
-    return c ? c.split("=")[1] : "";
+  function readCookie(name) {
+    const c = document.cookie.split("; ").find(r => r.startsWith(name + "="));
+    return c ? c.split("=").slice(1).join("=") : null;
   }
 
-  const sessionTag = getSessionTagFromCookie();
+  function ensureSessionTag() {
+    // Priority: gb_tag → gbuuid (set by GrowthBook SDK) → auto-generated UUID
+    const gbTag  = readCookie("gb_tag");
+    if (gbTag)  return gbTag;
+
+    const gbUuid = readCookie("gbuuid");
+    if (gbUuid) {
+      // Persist as gb_tag so it's stable across pages
+      document.cookie = "gb_tag=" + gbUuid + "; path=/; max-age=" + 365 * 24 * 60 * 60;
+      return gbUuid;
+    }
+
+    // No GrowthBook SDK → generate a persistent anonymous ID
+    const generated = "anon-" + Math.random().toString(36).slice(2, 10)
+                               + Math.random().toString(36).slice(2, 10);
+    document.cookie = "gb_tag=" + generated + "; path=/; max-age=" + 365 * 24 * 60 * 60;
+    return generated;
+  }
+
+  const sessionTag = ensureSessionTag();
 
   // ---------- TRACKING ----------
 
@@ -197,7 +221,21 @@
       if (!r.ok) {
         const t = await r.text().catch(() => "");
         console.debug("[GB-bridge] inventory non-200:", r.status, t);
+        return;
       }
+
+      // Store canonical featureKeys from backend for A/B recipe lookups
+      try {
+        const data = await r.json();
+        if (data.items && Array.isArray(data.items)) {
+          data.items.forEach(it => {
+            if (it.featureKey && !KNOWN_FEATURE_KEYS.includes(it.featureKey)) {
+              KNOWN_FEATURE_KEYS.push(it.featureKey);
+            }
+          });
+          console.debug("[GB-bridge] received featureKeys from backend:", KNOWN_FEATURE_KEYS.length, KNOWN_FEATURE_KEYS);
+        }
+      } catch (_) {}
     } catch (e) {
       console.debug("[GB-bridge] inventory send failed", e);
     }
@@ -304,10 +342,12 @@
             el.addEventListener("click", () => {
               const tag  = sessTag || getSessionTagFromCookie() || "";
               const page = pageUrl || location.href;
+              const assignedVariant = FEATURE_VARIANTS[featureKey] || null;
 
               sendTrackEvent({
                 featureKey,
-                variation: "A",
+                variation: assignedVariant || "A",
+                variantKey: assignedVariant,
                 sessionTag: tag,
                 page,
                 action: "click",
@@ -335,8 +375,34 @@
             break;
 
           case "css":
-            if (!op.prop || !ALLOWED_CSS_PROPS.has(op.prop)) return;
-            each((el) => (el.style[op.prop] = String(op.value ?? "")));
+            console.log("[GB-bridge] CSS op:", {
+              originalProp: op.prop,
+              selector: op.selector,
+              value: op.value,
+              nodesFound: nodes.length
+            });
+            if (!op.prop) {
+              console.warn("[GB-bridge] CSS op: no prop");
+              return;
+            }
+            // Convert kebab-case to camelCase for validation only
+            const propName = op.prop.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+            console.log("[GB-bridge] CSS converted prop:", propName);
+            if (!ALLOWED_CSS_PROPS.has(propName)) {
+              console.warn("[GB-bridge] CSS prop not allowed:", propName);
+              return;
+            }
+            console.log("[GB-bridge] Applying CSS to", nodes.length, "elements");
+            each((el) => {
+              // Use original kebab-case prop for setProperty
+              el.style.setProperty(op.prop, String(op.value ?? ""), 'important');
+              // background-color won't show if background: linear-gradient is set —
+              // clear background-image so the solid color is visible
+              if (op.prop === "background-color" || propName === "backgroundColor") {
+                el.style.setProperty("background-image", "none", "important");
+              }
+              console.log("[GB-bridge] Applied", op.prop, "=", op.value, "!important to", el);
+            });
             break;
 
           case "attr":
@@ -497,7 +563,8 @@
 
         sendTrackEvent({
           featureKey: key,
-          variation: "A",
+          variation: FEATURE_VARIANTS[key] || "A",
+          variantKey: FEATURE_VARIANTS[key] || null,
           sessionTag: currentSessionTag,
           page: pageUrl,
           action: "view",
@@ -523,10 +590,98 @@
     }
   };
 
+  // ---------- A/B Bridge: server-side variant delivery ----------
+
+  /**
+   * Calls /bridge/recipe for all page features.
+   * If the server has an active A/B experiment for a feature it returns:
+   *   { featureId, experimentId, variant: "treatment", recipe: { ops: [...] } }
+   * We apply the recipe and store the variantKey for tracking events.
+   */
+  async function applyAbBridgeRecipes() {
+    if (!sessionTag) return;
+
+    // Collect featureKeys this bridge already knows about (from inventory/GB prefix)
+    const gbInv = window.gbGetInventory ? window.gbGetInventory() : [];
+    const featureKeys = gbInv
+        .filter(it => it.featureKey)
+        .map(it => it.featureKey);
+
+    // Also include any keys starting with our site/page prefix from GB SDK
+    const gbInstance = getGrowthBookInstance();
+    if (gbInstance) {
+      const features =
+          (typeof gbInstance.getAllFeatures === "function" && gbInstance.getAllFeatures()) ||
+          (typeof gbInstance.getFeatures === "function" && gbInstance.getFeatures()) ||
+          gbInstance.features || {};
+      Object.keys(features)
+          .filter(k => k.startsWith(FEATURE_PREFIX) && !featureKeys.includes(k))
+          .forEach(k => featureKeys.push(k));
+    }
+
+    // Also use featureKeys received from backend after inventory POST
+    KNOWN_FEATURE_KEYS
+        .filter(k => !featureKeys.includes(k))
+        .forEach(k => featureKeys.push(k));
+
+    if (!featureKeys.length) {
+      console.debug("[GB-bridge] applyAbBridgeRecipes: no featureKeys found yet");
+      return;
+    }
+
+    const url = `${BRIDGE_ORIGIN}/bridge/recipe?url=${encodeURIComponent(location.href)}&session=${encodeURIComponent(sessionTag)}&features=${encodeURIComponent(featureKeys.join(","))}`;
+
+    try {
+      const res = await fetch(url, { credentials: "omit" });
+      if (!res.ok) {
+        console.debug("[GB-bridge] /bridge/recipe non-200:", res.status);
+        return;
+      }
+
+      const data = await res.json();
+
+      // Store variant assignment for tracking
+      if (data.variant && data.featureId) {
+        featureKeys.forEach(fk => { FEATURE_VARIANTS[fk] = data.variant; });
+        console.info("[GB-bridge] A/B variant assigned:", data.variant, "for experiment:", data.experimentId);
+      }
+
+      // Apply variant-specific recipe ops if present
+      const ops = data.recipe && Array.isArray(data.recipe.ops) ? data.recipe.ops : [];
+      if (ops.length) {
+        console.info("[GB-bridge] Applying", ops.length, "A/B recipe ops (variant:", data.variant, ")");
+        const applyOp = makeOpApplier(data.featureId, sessionTag, location.href);
+        ops.forEach(applyOp);
+      }
+
+      // Send view event for ANY assigned variant (including control with 0 ops)
+      const expFeatureKey = data.featureId || featureKeys[0];
+      if (data.variant && expFeatureKey && !VIEWED_FEATURES.has("ab_bridge_" + expFeatureKey)) {
+        VIEWED_FEATURES.add("ab_bridge_" + expFeatureKey);
+        sendTrackEvent({
+          featureKey: expFeatureKey,
+          variation: data.variant,
+          variantKey: data.variant,
+          sessionTag: sessionTag,
+          page: location.href,
+          action: "view",
+          meta: {
+            source: "ab-bridge",
+            experimentId: data.experimentId,
+            opsCount: ops.length
+          }
+        });
+      }
+    } catch (e) {
+      console.debug("[GB-bridge] applyAbBridgeRecipes failed:", e);
+    }
+  }
+
   // ---------- Init ----------
 
   function init() {
     const inv = collectInventory();
+    window.gbGetInventory = () => inv;
     try {
       sessionStorage.setItem("__GB_INV__", JSON.stringify(inv));
     } catch (_) { /* ignore */ }
@@ -557,7 +712,11 @@
 
     waitForGrowthBookAndHook(8000);
     setTimeout(applyDomFeatures, 400);
+    // A/B bridge: runs after inventory is collected (800ms), overrides with variant recipe
+    setTimeout(applyAbBridgeRecipes, 800);
     setTimeout(applyDomFeatures, 1500);
+    // Re-apply A/B in case DOM changed
+    setTimeout(applyAbBridgeRecipes, 2000);
   }
 
   if (document.readyState === "loading") {

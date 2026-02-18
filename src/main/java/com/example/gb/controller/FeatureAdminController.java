@@ -29,7 +29,7 @@ public class FeatureAdminController {
             produces = MediaType.TEXT_PLAIN_VALUE
     )
     public Mono<ResponseEntity<String>> upsert(@Valid @RequestBody UpsertReq req) {
-        return gb.upsertJsonFeature(req.getId(), req.getJson())
+        return gb.upsertJsonFeatureRaw(req.getId(), req.getJson())
                 .map(ResponseEntity::ok)
                 .onErrorResume(ex ->
                         Mono.just(ResponseEntity.status(500).body("GB error: " + ex.getMessage())));

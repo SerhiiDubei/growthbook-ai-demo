@@ -24,7 +24,8 @@ public class SecurityConfig {
                         new AntPathRequestMatcher("/bridge/**"),
                         new AntPathRequestMatcher("/api/gb/track", "POST"),
                         new AntPathRequestMatcher("/api/gb/dom-events", "POST"),
-                        new AntPathRequestMatcher("/api/ai/**")
+                        new AntPathRequestMatcher("/api/ai/**"),
+                        new AntPathRequestMatcher("/api/experiments/**")
 
                 ))
                 .authorizeHttpRequests(reg -> reg.anyRequest().permitAll())

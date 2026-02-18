@@ -30,7 +30,7 @@ public class GbConsoleController {
                 env,
                 (req.getRules() == null ? 0 : req.getRules().size()));
 
-        return gb.upsertJsonFeatureAdvanced(
+        return gb.upsertJsonFeatureAdvancedRaw(
                         req.getKey(),
                         env,
                         req.getValue(),

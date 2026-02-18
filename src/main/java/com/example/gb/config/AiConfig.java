@@ -3,6 +3,7 @@ package com.example.gb.config;
 import com.example.gb.ai.Assistant;
 import com.example.gb.ai.tools.DomAnalyticsTools;
 import com.example.gb.ai.tools.DomInventoryTools;
+import com.example.gb.ai.tools.ExperimentTools;
 import com.example.gb.ai.tools.GrowthBookTools;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -38,12 +39,13 @@ public class AiConfig {
             ChatMemoryProvider memory,
             GrowthBookTools gbTools,
             DomAnalyticsTools domAnalyticsTools,
-            DomInventoryTools domInventoryTools) {
+            DomInventoryTools domInventoryTools,
+            ExperimentTools experimentTools) {
 
         return AiServices.builder(Assistant.class)
                 .chatModel(model)
                 .chatMemoryProvider(memory)
-                .tools(domInventoryTools, gbTools, domAnalyticsTools)
+                .tools(domInventoryTools, gbTools, domAnalyticsTools, experimentTools)
                 .build();
     }
 

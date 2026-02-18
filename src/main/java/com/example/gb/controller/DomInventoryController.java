@@ -20,19 +20,21 @@ public class DomInventoryController {
     private final DomInventoryService domInventoryService;
 
     @PostMapping
-    public ResponseEntity<Void> save(@RequestBody DomInventory payload) {
+    public ResponseEntity<Map<String, Object>> save(@RequestBody DomInventory payload) {
 
         String url = Optional.ofNullable(payload.getUrl()).orElse("");
         var items = Optional.ofNullable(payload.getInventory()).orElseGet(List::of);
 
         var res = domInventoryService.saveFromPageUrl(url, items);
 
-        // ВАЖЛИВО: items тут "сирі" (з bridge), тому featureKey може бути порожнім/не канонічним.
-        // Канонічні featureKey вже присвоєні всередині DomInventoryService під час normalize().
         log.info("📥 dom-inventory POST url={} inventoryItems={} savedPageKey={} hash={}",
                 url, items.size(), res.pageKey(), res.hash());
 
-        return ResponseEntity.accepted().build();
+        // Return canonical featureKeys so frontend can use them for A/B recipe lookups
+        return ResponseEntity.accepted().body(Map.of(
+                "pageKey", res.pageKey(),
+                "items", res.featureItems()
+        ));
     }
 
     @GetMapping
