@@ -68,6 +68,7 @@ services:
       - "5433:5432"        # ззовні 5433, всередині 5432 (щоб не конфліктувати з локальним 5432)
     volumes:
       - events_pg_data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks: [appnet]
 
     logging:
