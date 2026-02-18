@@ -72,7 +72,7 @@ public class DomInventoryService {
         // ✅ registry sync тепер теж має бачити ТІЛЬКИ бекендові ключі (в items)
         domRegistry.syncAsync(pageUrl, safeItems);
 
-        return new SaveResult(pageKey, origin, safeItems.size(), saved.getItemsHash());
+        return new SaveResult(pageKey, origin, safeItems.size(), saved.getItemsHash(), safeItems);
     }
 
     public List<Item> getLatestByOrigin(String origin) {
@@ -167,5 +167,6 @@ public class DomInventoryService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
-    public record SaveResult(String pageKey, String origin, int items, String hash) {}
+    public record SaveResult(String pageKey, String origin, int items, String hash,
+                             List<Item> featureItems) {}
 }

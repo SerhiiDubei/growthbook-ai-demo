@@ -1,7 +1,11 @@
 package com.example.gb.service;
 
 import com.example.gb.controller.BridgeController;
-import com.example.gb.service.GbAdminService;
+import com.example.gb.model.Experiment;
+import com.example.gb.model.ExperimentVariant;
+import com.example.gb.model.enums.ExperimentStatus;
+import com.example.gb.repository.ExperimentRepository;
+import com.example.gb.repository.ExperimentVariantRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +21,10 @@ import java.util.*;
 @RequiredArgsConstructor
 public class BridgeService {
 
-    private final GbAdminService gb;              // клієнт Admin API
+    private final GbAdminService gb;
+    private final ExperimentRepository experimentRepo;
+    private final ExperimentVariantRepository variantRepo;
+    private final VariantAssignmentService variantAssignment;
     private final ObjectMapper om = new ObjectMapper();
 
     /**
@@ -35,10 +42,47 @@ public class BridgeService {
     ) {
         List<Map<String, Object>> mergedOps = new ArrayList<>();
 
-        String chosenVariant = null;   // для метаданих відповіді
+        String chosenVariant = null;
         String chosenExperiment = null;
+        String chosenFeatureId = null; // actual featureId of matched A/B experiment
 
         for (String fid : featureIds) {
+
+            // 1) Check if there is an ACTIVE A/B experiment with variants in DB for this featureKey
+            Optional<Experiment> activeExp = experimentRepo.findByFeatureKey(fid);
+            if (activeExp.isPresent() && activeExp.get().getStatus() == ExperimentStatus.ACTIVE) {
+                Experiment exp = activeExp.get();
+                List<ExperimentVariant> variants =
+                        variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(exp.getId());
+
+                if (!variants.isEmpty()) {
+                    // Server-side variant assignment: deterministic hash
+                    String assignedKey = variantAssignment.assign(session, exp.getKey(), variants);
+                    ExperimentVariant assignedVariant = variants.stream()
+                            .filter(v -> v.getKey().equals(assignedKey))
+                            .findFirst()
+                            .orElse(variants.get(0));
+
+                    chosenVariant = assignedVariant.getKey();
+                    chosenExperiment = exp.getKey();
+                    chosenFeatureId = fid; // remember actual featureKey for tracking
+
+                    Map<String, Object> recipe = safeParseJson(assignedVariant.getRecipeJson());
+                    List<Map<String, Object>> ops = getOps(recipe);
+
+                    if (!ops.isEmpty()) {
+                        mergedOps.addAll(ops);
+                        log.info("🔀 A/B bridge: feature={} session={}… variant={} ops={}",
+                                fid, session.length() > 6 ? session.substring(0, 6) + "…" : session,
+                                assignedVariant.getKey(), ops.size());
+                    } else {
+                        log.debug("🔀 A/B bridge: feature={} variant={} → no ops (control)", fid, assignedVariant.getKey());
+                    }
+                    continue; // skip GB lookup for this feature — DB variant takes priority
+                }
+            }
+
+            // 2) No active A/B experiment → fall back to GB feature (existing logic)
             var feature = fetchFeature(fid);
             if (feature == null) continue;
 
@@ -47,21 +91,16 @@ public class BridgeService {
                 continue;
             }
 
-            // 1) Якщо є tag і у DEV є правило для tag → беремо його
+            // tag-based rule (QA/preview)
             Optional<String> ruleValue = feature.findRuleValueBySessionTag(tag, om);
 
-            // 2) Якщо не знайшли rule і заданий percent → A/B по session
+            // percent-based rollout (legacy)
             if (ruleValue.isEmpty() && percent != null) {
                 int bucket = bucket100(session + ":" + fid);
                 boolean in = bucket < Math.max(0, Math.min(100, percent));
                 chosenVariant = in ? "B" : "A";
                 chosenExperiment = fid + "_rollout_" + percent;
-
-                if (!in) {
-                    ruleValue = Optional.empty(); // A → дефолт
-                } else {
-                    // B → тут теж дефолт (або роби окрему фічу для B і включай її у features=)
-                }
+                // B → still uses defaultValue in current impl (future: separate B recipe)
             }
 
             String json = ruleValue.orElse(feature.getDefaultValue());
@@ -74,8 +113,12 @@ public class BridgeService {
             }
         }
 
+        // Use actual A/B featureId if matched, otherwise fall back to single/merged
+        String responseFeatureId = chosenFeatureId != null ? chosenFeatureId
+                : (featureIds.size() == 1 ? featureIds.get(0) : "merged");
+
         return new BridgeController.RecipeResponse(
-                featureIds.size() == 1 ? featureIds.get(0) : "merged",
+                responseFeatureId,
                 chosenExperiment,
                 chosenVariant,
                 new BridgeController.Recipe(mergedOps)
