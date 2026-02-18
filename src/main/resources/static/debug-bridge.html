@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bridge Debug</title>
+</head>
+<body>
+<h1>GrowthBook Bridge Debug</h1>
+
+<div style="margin: 20px; font-family: monospace;">
+  <h2>Test Button</h2>
+  <button class="btn btn-cta" style="padding: 10px 20px; font-size: 16px;">Try now</button>
+
+  <h2>Debug Info</h2>
+  <pre id="debug-output" style="background: #f0f0f0; padding: 10px; max-height: 500px; overflow: auto;"></pre>
+
+  <h2>Manual Apply</h2>
+  <button onclick="testApply()" style="padding: 10px 20px;">Apply Recipe Manually</button>
+  <button onclick="checkFeature()" style="padding: 10px 20px;">Check Feature</button>
+</div>
+
+<script>
+  const output = document.getElementById('debug-output');
+  
+  function log(msg) {
+    console.log(msg);
+    output.textContent += msg + '\n';
+  }
+
+  function testApply() {
+    log('=== Manual Apply Test ===');
+    const btn = document.querySelector('.btn-cta');
+    if (!btn) {
+      log('ERROR: Button not found!');
+      return;
+    }
+    log('Button found: ' + btn.textContent);
+    
+    // Apply yellow background
+    btn.style.backgroundColor = 'yellow';
+    log('Applied backgroundColor = yellow');
+    log('Current style: ' + btn.style.backgroundColor);
+  }
+
+  function checkFeature() {
+    log('=== Feature Check ===');
+    
+    if (!window.growthbook) {
+      log('ERROR: window.growthbook not found!');
+      return;
+    }
+    
+    log('GrowthBook instance found');
+    
+    const featureKey = 'localhost_8080__home__cta__button_btn_btn_cta_36f497d0';
+    const value = window.growthbook.getFeatureValue(featureKey, null);
+    
+    log('Feature key: ' + featureKey);
+    log('Feature value: ' + JSON.stringify(value, null, 2));
+    
+    if (value && typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        log('Parsed value: ' + JSON.stringify(parsed, null, 2));
+      } catch (e) {
+        log('Failed to parse: ' + e.message);
+      }
+    }
+    
+    // Check all features
+    const all = window.growthbook.getAllFeatures ? window.growthbook.getAllFeatures() : {};
+    log('All features: ' + Object.keys(all).join(', '));
+  }
+
+  // Log initial state
+  setTimeout(() => {
+    log('=== Page Loaded ===');
+    log('GrowthBook: ' + (window.growthbook ? 'YES' : 'NO'));
+    log('gbDomBridgeApply: ' + (window.gbDomBridgeApply ? 'YES' : 'NO'));
+    
+    if (window.growthbook) {
+      checkFeature();
+    }
+  }, 2000);
+</script>
+
+<!-- GrowthBook SDK -->
+<script>
+  window.growthbook_queue = window.growthbook_queue || [];
+  window.growthbook_queue.push((gb) => {
+    console.log('[Debug] GrowthBook ready');
+    window.growthbook = gb;
+    log('GrowthBook SDK loaded');
+    
+    if (window.gbDomBridgeApply) {
+      log('Calling gbDomBridgeApply...');
+      window.gbDomBridgeApply();
+    }
+  });
+</script>
+<script async
+        src="https://cdn.jsdelivr.net/npm/@growthbook/growthbook/dist/bundles/auto.min.js"
+        data-client-key="sdk-d39CZ31PzX2T7OTa"
+        data-api-host="http://localhost:3100"
+></script>
+
+<!-- Bridge -->
+<script src="/ai-bridge.js"></script>
+
+</body>
+</html>
