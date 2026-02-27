@@ -417,7 +417,8 @@ public class ExperimentService {
         // Sync updated variant rules to GB (best-effort)
         try {
             List<ExperimentVariant> allVariants = variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(experimentId);
-            gbSync.upsertRecipeWithVariants(exp, allVariants);
+            GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(exp, allVariants);
+            persistGbIds(exp, allVariants, syncResult);
             log.info("✅ addVariant OK id={} expId={} key={}", saved.getId(), experimentId, saved.getKey());
         } catch (Exception ex) {
             log.warn("⚠️ addVariant saved in DB but GB sync failed expId={} variantKey={} err={}",
@@ -461,7 +462,8 @@ public class ExperimentService {
             if (remaining.isEmpty()) {
                 gbSync.upsertRecipe(exp);
             } else {
-                gbSync.upsertRecipeWithVariants(exp, remaining);
+                GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(exp, remaining);
+                persistGbIds(exp, remaining, syncResult);
             }
         } catch (Exception ex) {
             log.warn("⚠️ deleteVariant removed from DB but GB sync failed variantId={} err={}", variantId, ex.getMessage());
@@ -479,6 +481,69 @@ public class ExperimentService {
             // if (!node.has("ops")) throw new IllegalArgumentException("recipeJson must contain 'ops'");
         } catch (Exception e) {
             throw new IllegalArgumentException("recipeJson invalid JSON: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Re-syncs ALL non-terminal experiments to GrowthBook with updated rules.
+     * Use after upgrading rule type (e.g. force → experiment).
+     * Returns a summary map: experimentId → "ok" | "skipped" | error message.
+     */
+    public Map<Long, String> syncAllToGrowthBook() {
+        List<Experiment> toSync = experimentRepo.findAll().stream()
+                .filter(e -> e.getStatus() == ExperimentStatus.DRAFT
+                        || e.getStatus() == ExperimentStatus.ACTIVE
+                        || e.getStatus() == ExperimentStatus.PAUSED)
+                .toList();
+
+        log.info("🔄 syncAllToGrowthBook: {} experiments to sync", toSync.size());
+
+        Map<Long, String> result = new java.util.LinkedHashMap<>();
+        for (Experiment exp : toSync) {
+            try {
+                List<ExperimentVariant> variants =
+                        variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(exp.getId());
+                GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(exp, variants);
+                persistGbIds(exp, variants, syncResult);
+                result.put(exp.getId(), syncResult.hasGbExperiment()
+                        ? "ok (gbExpId=" + syncResult.gbExperimentId() + ")"
+                        : "ok");
+                log.info("✅ synced expId={} key={} gbExpId={}", exp.getId(), exp.getKey(), syncResult.gbExperimentId());
+            } catch (Exception ex) {
+                result.put(exp.getId(), "error: " + ex.getMessage());
+                log.warn("⚠️ sync failed expId={} key={} err={}", exp.getId(), exp.getKey(), ex.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Persists GB Experiment ID and per-variant GB Variation IDs returned by sync.
+     * Called after every upsertRecipeWithVariants to keep the DB in sync with GB.
+     */
+    private void persistGbIds(Experiment exp,
+                               List<ExperimentVariant> variants,
+                               GrowthBookSyncService.SyncResult syncResult) {
+        if (syncResult == null || !syncResult.hasGbExperiment()) return;
+
+        boolean changed = false;
+        if (!syncResult.gbExperimentId().equals(exp.getGbExperimentId())) {
+            exp.setGbExperimentId(syncResult.gbExperimentId());
+            experimentRepo.save(exp);
+            changed = true;
+        }
+
+        for (ExperimentVariant v : variants) {
+            String gbVarId = syncResult.variantKeyToGbVariationId().get(v.getKey());
+            if (gbVarId != null && !gbVarId.equals(v.getGbVariationId())) {
+                v.setGbVariationId(gbVarId);
+                variantRepo.save(v);
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            log.info("💾 persistGbIds: saved gbExpId={} for expId={}", syncResult.gbExperimentId(), exp.getId());
         }
     }
 
