@@ -86,24 +86,38 @@
 
 <<!-- 1) GrowthBook HTML Script Tag SDK (auto.min.js) -->
 <script>
-  // Черга для HTML SDK. Цей код має бути ДО auto.min.js.
+  // Queue for HTML SDK — must be BEFORE auto.min.js loads.
   window.growthbook_queue = window.growthbook_queue || [];
   window.growthbook_queue.push((gb) => {
     console.log("[GB] SDK ready, attaching to window.growthbook");
-    // зберігаємо інстанс, щоб місток міг його взяти
     window.growthbook = gb;
 
+    // Set id attribute BEFORE features are evaluated so experiment bucketing works correctly.
+    // Priority: gb_tag cookie → gbuuid cookie → anonymous UUID
+    const _rc = (n) => { const c = document.cookie.split("; ").find(r => r.startsWith(n + "=")); return c ? c.split("=").slice(1).join("=") : null; };
+    const _uid = _rc("gb_tag") || _rc("gbuuid") || ("anon-" + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10));
+
     try {
-      // Для дебагу: подивитись, що реально прийшло з GrowthBook
-      const all = (typeof gb.getAllFeatures === "function"
-          ? gb.getAllFeatures()
-          : gb.features) || {};
+      const base = (typeof gb.getAttributes === "function" && gb.getAttributes()) || {};
+      gb.setAttributes({
+        ...base,
+        id: _uid,             // KEY: GB uses "id" as hashAttribute for experiment rules
+        url: location.href,
+        device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop",
+        sessionTag: _uid
+      });
+      console.log("[GB] attributes set: id=", _uid);
+    } catch (e) {
+      console.warn("[GB] setAttributes failed", e);
+    }
+
+    try {
+      const all = (typeof gb.getAllFeatures === "function" ? gb.getAllFeatures() : gb.features) || {};
       console.log("[GB] feature keys from SDK:", Object.keys(all));
     } catch (e) {
       console.warn("[GB] error reading features", e);
     }
 
-    // якщо місток уже завантажився - дати йому шанс застосувати фічі
     if (window.gbDomBridgeApply) {
       window.gbDomBridgeApply();
     }

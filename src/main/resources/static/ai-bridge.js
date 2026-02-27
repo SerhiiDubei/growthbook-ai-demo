@@ -27,8 +27,11 @@
   const VIEWED_FEATURES = new Set();
   // elements that already have click listener bound
   const CLICK_BOUND = new WeakSet();
-  // variant assigned by server per featureKey (populated by applyAbBridgeRecipes)
+  // variant assigned per featureKey (by GB SDK experiment rule or server fallback)
   const FEATURE_VARIANTS = {};
+  // featureKeys where GB SDK already assigned a variant via experiment rule
+  // → /bridge/recipe fallback is skipped for these
+  const GB_SDK_ASSIGNED = new Set();
   // canonical featureKeys returned by backend after inventory POST
   const KNOWN_FEATURE_KEYS = [];
 
@@ -126,6 +129,24 @@
       }
     } catch (e) {
       console.debug("[GB-bridge] track send failed", e);
+    }
+  }
+
+  // ---------- GB SDK HELPERS ----------
+
+  /**
+   * Extracts __variantKey__ injected by GbAdminService.injectVariantKey().
+   * Returns null if not present or parsing fails.
+   */
+  function extractVariantKeyFromValue(value) {
+    if (!value) return null;
+    try {
+      const parsed = typeof value === "string" ? JSON.parse(value) : value;
+      return (parsed && typeof parsed === "object" && parsed.__variantKey__)
+          ? String(parsed.__variantKey__)
+          : null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -340,7 +361,7 @@
             CLICK_BOUND.add(el);
 
             el.addEventListener("click", () => {
-              const tag  = sessTag || getSessionTagFromCookie() || "";
+              const tag  = sessTag || readCookie("gb_tag") || sessionTag || "";
               const page = pageUrl || location.href;
               const assignedVariant = FEATURE_VARIANTS[featureKey] || null;
 
@@ -447,6 +468,66 @@
 
     console.debug("[GB-bridge] hooking GrowthBook instance");
 
+    // Set id attribute — GB SDK uses "id" for experiment bucketing (hashing)
+    if (typeof gb.setAttributes === "function") {
+      try {
+        const base = (typeof gb.getAttributes === "function" && gb.getAttributes()) || {};
+        if (!base.id) {
+          gb.setAttributes({
+            ...base,
+            id: sessionTag,
+            url: location.href,
+            device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop",
+            sessionTag
+          });
+          console.debug("[GB-bridge] GB attributes set: id=", sessionTag);
+        }
+      } catch (e) {
+        console.debug("[GB-bridge] setAttributes in hookGrowthBook failed", e);
+      }
+    }
+
+    // trackingCallback fires when GB SDK assigns a variant via experiment rule
+    if (typeof gb.setTrackingCallback === "function") {
+      try {
+        gb.setTrackingCallback((experiment, result) => {
+          const featureKey = (result && result.featureId) || experiment.key;
+          const embeddedKey = extractVariantKeyFromValue(result && result.value);
+          const variantKey = embeddedKey
+              || (result && result.variationId === 0 ? "control" : "treatment");
+
+          console.info("[GB-bridge] SDK assigned:", featureKey, "→", variantKey,
+              "(variationId:", result && result.variationId, ")");
+
+          if (featureKey) {
+            FEATURE_VARIANTS[featureKey] = variantKey;
+            GB_SDK_ASSIGNED.add(featureKey);
+          }
+
+          const trackKey = "sdk_" + featureKey;
+          if (featureKey && !VIEWED_FEATURES.has(trackKey)) {
+            VIEWED_FEATURES.add(trackKey);
+            sendTrackEvent({
+              featureKey,
+              variation: variantKey,
+              variantKey,
+              sessionTag,
+              page: location.href,
+              action: "view",
+              meta: {
+                source: "gb-sdk",
+                experimentKey: experiment.key,
+                variationId: result ? result.variationId : null
+              }
+            });
+          }
+        });
+        console.debug("[GB-bridge] trackingCallback registered for GB SDK assignments");
+      } catch (e) {
+        console.debug("[GB-bridge] setTrackingCallback failed", e);
+      }
+    }
+
     if (typeof gb.subscribe === "function") {
       try {
         gb.subscribe(() => {
@@ -534,7 +615,7 @@
 
     console.info("[GB-bridge] applying", keys.length, "features with prefix", FEATURE_PREFIX);
 
-    const currentSessionTag = getSessionTagFromCookie() || "auto";
+    const currentSessionTag = readCookie("gb_tag") || sessionTag || "auto";
     const pageUrl = location.href;
 
     keys.forEach(key => {
@@ -547,6 +628,13 @@
       if (!val) {
         console.debug("[GB-bridge] feature", key, "has no valid JSON value");
         return;
+      }
+
+      // Extract __variantKey__ injected by backend sync (Phase 2: GB SDK experiment rule)
+      if (val.__variantKey__) {
+        FEATURE_VARIANTS[key] = val.__variantKey__;
+        GB_SDK_ASSIGNED.add(key);
+        console.debug("[GB-bridge] feature", key, "→ variant:", val.__variantKey__, "(from recipe)");
       }
 
       const applyOp = makeOpApplier(key, currentSessionTag, pageUrl);
@@ -629,7 +717,18 @@
       return;
     }
 
-    const url = `${BRIDGE_ORIGIN}/bridge/recipe?url=${encodeURIComponent(location.href)}&session=${encodeURIComponent(sessionTag)}&features=${encodeURIComponent(featureKeys.join(","))}`;
+    // Skip features already assigned by GB SDK experiment rules (Phase 2)
+    const serverFeatureKeys = featureKeys.filter(k => !GB_SDK_ASSIGNED.has(k));
+    if (!serverFeatureKeys.length) {
+      console.debug("[GB-bridge] all features handled by GB SDK experiment rules, skipping /bridge/recipe");
+      return;
+    }
+    if (serverFeatureKeys.length < featureKeys.length) {
+      console.debug("[GB-bridge] skipping", featureKeys.length - serverFeatureKeys.length,
+          "GB-SDK-assigned features, server fallback for:", serverFeatureKeys);
+    }
+
+    const url = `${BRIDGE_ORIGIN}/bridge/recipe?url=${encodeURIComponent(location.href)}&session=${encodeURIComponent(sessionTag)}&features=${encodeURIComponent(serverFeatureKeys.join(","))}`;
 
     try {
       const res = await fetch(url, { credentials: "omit" });
@@ -701,10 +800,12 @@
         const base = (typeof gbNow.getAttributes === "function" && gbNow.getAttributes()) || {};
         gbNow.setAttributes({
           ...base,
+          id: sessionTag,       // KEY: GB uses "id" for experiment bucketing
           url: location.href,
           device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop",
-          sessionTag
+          sessionTag            // backward compat
         });
+        console.debug("[GB-bridge] init: GB attributes set, id=", sessionTag);
       } catch (e) {
         console.warn("[GB-bridge] setAttributes skipped", e);
       }
