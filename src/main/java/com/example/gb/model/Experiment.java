@@ -71,6 +71,14 @@ public class Experiment extends AbstractVersional {
     private String lastError;
 
     /**
+     * Native GrowthBook Experiment ID (e.g. "exp_abc123").
+     * Populated after experiment is synced to GB via POST /api/v1/experiments.
+     * Null until the experiment has been synced.
+     */
+    @Column(name = "gb_experiment_id", length = 100)
+    private String gbExperimentId;
+
+    /**
      * A/B variants for this experiment.
      * Empty = single-arm (100% one recipe — legacy behaviour).
      * Populated = A/B mode: weights must sum to 1.0.
