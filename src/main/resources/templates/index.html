@@ -3,124 +3,545 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>GrowthBook AI Demo (Local SDK)</title>
+  <title>GrowthBook AI Demo</title>
   <style>
+    *, *::before, *::after { box-sizing: border-box; }
 
     body {
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Helvetica, Arial, sans-serif;
-      padding: 24px;
-      line-height: 1.5;
-      background: #f8faff;
-      color: #222;
+      margin: 0;
+      padding: 0;
+      background: #f0f4ff;
+      color: #1a1a2e;
+      line-height: 1.6;
     }
-    .hero { max-width: 860px; margin: auto; text-align: center; }
-    .site-title { color: #223366; }
-    .btn, .btn-cta {
+
+    /* ─── Layout ─── */
+    .page-wrapper {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ─── Shared block shell ─── */
+    .block {
+      background: #fff;
+      border-radius: 18px;
+      padding: 36px 40px;
+      box-shadow: 0 2px 16px rgba(60, 80, 180, 0.07);
+    }
+
+    /* ─── Headings ─── */
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #6b7fff;
+      margin-bottom: 8px;
+    }
+    h1, h2, h3 { margin: 0 0 8px; }
+    h1 { font-size: 2.6rem; line-height: 1.2; }
+    h2 { font-size: 1.6rem; }
+    h3 { font-size: 1.1rem; }
+    p  { margin: 0 0 16px; color: #444; }
+
+    /* ─── Buttons ─── */
+    .btn {
       display: inline-block;
-      padding: 12px 20px;
-      border-radius: 10px;
+      padding: 12px 28px;
+      border-radius: 12px;
       border: none;
       cursor: pointer;
-      font-size: 16px;
-      background: linear-gradient(45deg, #457bff, #00b7ff);
+      font-size: 15px;
+      font-weight: 600;
+      transition: transform 0.15s, box-shadow 0.15s;
+      text-decoration: none;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.15); }
+    .btn-primary { background: linear-gradient(135deg, #457bff, #00c8ff); color: #fff; }
+    .btn-secondary { background: #f0f4ff; color: #457bff; }
+    .btn-dark    { background: #1a1a2e; color: #fff; }
+
+    /* ─── HERO ─── */
+    #block-hero {
+      background: linear-gradient(135deg, #1a1a2e 0%, #223366 60%, #1a4080 100%);
       color: #fff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-      transition: 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 40px;
+      padding: 56px 48px;
     }
-    .btn:hover { transform: scale(1.05); }
-    .muted { color: #666; }
-    .grid {
+    #block-hero .hero-text { flex: 1; }
+    #block-hero h1 { color: #fff; }
+    #block-hero p  { color: #b0c4ff; font-size: 1.1rem; }
+    #block-hero .hero-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 99px;
+      padding: 4px 14px;
+      font-size: 13px;
+      color: #aad4ff;
+      margin-bottom: 16px;
+    }
+    #block-hero .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+    #block-hero .hero-visual {
+      flex: 0 0 280px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px;
+      padding: 28px 24px;
+      font-size: 13px;
+      color: #99bbff;
+      font-family: monospace;
+      line-height: 2;
+    }
+    #block-hero .hero-visual span { color: #5cf; }
+    #block-hero .hero-visual em   { color: #ffd54f; font-style: normal; }
+
+    /* ─── STATS ─── */
+    #block-stats {
+      background: linear-gradient(135deg, #457bff, #00c8ff);
+      color: #fff;
+    }
+    .stats-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 24px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
     }
-    code {
-      background: #f5f5f5;
-      padding: 2px 6px;
-      border-radius: 6px;
+    .stat-item { text-align: center; padding: 16px 8px; }
+    .stat-item .stat-value { font-size: 2.4rem; font-weight: 800; line-height: 1; }
+    .stat-item .stat-label { font-size: 13px; opacity: 0.85; margin-top: 6px; }
+
+    /* ─── FEATURES GRID ─── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .feature-card {
+      background: #f5f8ff;
+      border-radius: 14px;
+      padding: 24px;
+      border: 1px solid #e3eaff;
+      transition: transform 0.15s;
+    }
+    .feature-card:hover { transform: translateY(-3px); }
+    .feature-icon {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      margin-bottom: 14px;
+    }
+    .feature-icon.blue   { background: #dbeafe; }
+    .feature-icon.purple { background: #ede9fe; }
+    .feature-icon.green  { background: #dcfce7; }
+    .feature-icon.orange { background: #ffedd5; }
+    .feature-icon.pink   { background: #fce7f3; }
+    .feature-icon.teal   { background: #ccfbf1; }
+
+    /* ─── PROMO BANNER ─── */
+    #block-promo {
+      background: linear-gradient(120deg, #1a2e00 0%, #2d5a00 50%, #1a4000 100%);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    #block-promo .promo-badge {
+      background: #7fff5f;
+      color: #1a2e00;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 99px;
+      margin-bottom: 10px;
+      display: inline-block;
+    }
+    #block-promo h2 { color: #fff; }
+    #block-promo p  { color: #b6f5a0; margin: 0; }
+
+    /* ─── PRODUCTS ─── */
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+    }
+    .product-card {
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid #e8eeff;
+      transition: box-shadow 0.15s;
+      background: #fff;
+    }
+    .product-card:hover { box-shadow: 0 8px 28px rgba(60,80,200,0.12); }
+    .product-thumb {
+      height: 130px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 50px;
+    }
+    .product-body { padding: 14px; }
+    .product-body h3 { font-size: 15px; margin-bottom: 4px; }
+    .product-body .price {
+      font-size: 18px; font-weight: 700;
+      color: #457bff;
+    }
+    .product-body .old-price {
+      font-size: 13px;
+      text-decoration: line-through;
+      color: #aaa;
+      margin-left: 6px;
+    }
+
+    /* ─── TESTIMONIALS ─── */
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .testimonial-card {
+      background: #f7f9ff;
+      border: 1px solid #e3eaff;
+      border-radius: 14px;
+      padding: 22px;
+    }
+    .testimonial-stars { color: #fbbf24; font-size: 17px; margin-bottom: 10px; }
+    .testimonial-text { font-size: 14px; color: #444; font-style: italic; margin-bottom: 16px; }
+    .testimonial-author { display: flex; align-items: center; gap: 10px; }
+    .testimonial-avatar {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      background: #e3eaff;
+    }
+    .testimonial-name { font-size: 13px; font-weight: 700; }
+    .testimonial-role { font-size: 12px; color: #999; }
+
+    /* ─── HOW IT WORKS ─── */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      counter-reset: steps;
+    }
+    .step {
+      position: relative;
+      padding: 24px 20px 20px;
+      background: #f5f8ff;
+      border-radius: 14px;
+      border: 1px solid #e3eaff;
+    }
+    .step-num {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, #457bff, #00c8ff);
+      border-radius: 50%;
+      color: #fff;
+      font-weight: 700;
       font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 14px;
     }
+    .step h3 { font-size: 15px; margin-bottom: 6px; }
+    .step p   { font-size: 13px; color: #666; margin: 0; }
+
+    /* ─── CTA FOOTER ─── */
+    #block-cta {
+      background: linear-gradient(135deg, #2d1b69, #457bff);
+      color: #fff;
+      text-align: center;
+      padding: 56px 40px;
+    }
+    #block-cta h2 { color: #fff; font-size: 2rem; }
+    #block-cta p  { color: #c5d8ff; font-size: 1.05rem; max-width: 500px; margin: 0 auto 28px; }
+    #block-cta .cta-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* ─── DOM Inventory debug ─── */
+    #block-debug {
+      background: #1a1a2e;
+      color: #aad4ff;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    #block-debug h3 { color: #5cf; margin-bottom: 12px; }
     .inv {
-      font-size: 14px;
-      background: #fafafa;
-      border: 1px solid #eee;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 8px;
-      padding: 12px;
-      max-height: 240px;
+      padding: 14px;
+      max-height: 220px;
       overflow: auto;
-      text-align: left;
+    }
+
+    @media (max-width: 768px) {
+      .stats-grid, .products-grid { grid-template-columns: repeat(2, 1fr); }
+      .features-grid, .testimonials-grid, .steps-grid { grid-template-columns: 1fr; }
+      #block-hero { flex-direction: column; }
+      #block-hero .hero-visual { flex: none; width: 100%; }
     }
   </style>
 </head>
 <body>
-<div class="hero">
-  <h1 class="site-title">Organize your work</h1>
-  <p class="muted">
-    This page demonstrates a thin DOM bridge controlled by GrowthBook (local SDK).
-  </p>
-  <p>
-    <button class="btn btn-cta" type="button">
-      Try now
-    </button>
-  </p>
+<div class="page-wrapper">
 
-  <div class="grid">
-    <div>
-      <h3>Inventory</h3>
-      <div id="inv" class="inv">Loading…</div>
+  <!-- ▓▓ BLOCK 1 — HERO ▓▓ -->
+  <section class="block" id="block-hero" data-block="hero">
+    <div class="hero-text">
+      <span class="hero-badge">✦ Powered by GrowthBook AI</span>
+      <h1>Organize your work<br>smarter, faster</h1>
+      <p>AI-driven feature flags and A/B experiments that adapt your UI in real time — without a deploy.</p>
+      <div class="hero-actions">
+        <button class="btn btn-primary" id="btn-try-now" type="button">Try now</button>
+        <button class="btn btn-secondary" type="button">Watch demo</button>
+      </div>
     </div>
-    <div>
-      <h3>How it works</h3>
-      <ol>
-        <li>Browser SDK loads features from <code id="apiHost"></code></li>
-        <li>Bridge scans DOM (headings, CTAs)</li>
-        <li>Sends inventory to <code>/api/gb/dom-inventory</code></li>
-        <li>Optionally applies JSON “recipes” from GrowthBook</li>
-      </ol>
+    <div class="hero-visual">
+      <div><span>feature</span>: <em>"new-checkout"</em></div>
+      <div><span>variant</span>: <em>"B"</em></div>
+      <div><span>traffic</span>: <em>50%</em></div>
+      <div><span>status</span>: <em>running ✓</em></div>
+      <div><span>users</span>: <em>3 241</em></div>
+      <div><span>CVR Δ</span>: <em>+12.4 %</em></div>
     </div>
-  </div>
-</div>
+  </section>
+
+  <!-- ▓▓ BLOCK 2 — STATS ▓▓ -->
+  <section class="block" id="block-stats" data-block="stats">
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="stat-value">14 k</div>
+        <div class="stat-label">Active users</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">98 %</div>
+        <div class="stat-label">Uptime SLA</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">+23 %</div>
+        <div class="stat-label">Avg CVR lift</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">7</div>
+        <div class="stat-label">Live experiments</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▓▓ BLOCK 3 — FEATURES ▓▓ -->
+  <section class="block" id="block-features" data-block="features">
+    <div class="section-label">What you get</div>
+    <h2>Everything you need to ship faster</h2>
+    <p style="margin-bottom:28px;">Integrate once, experiment forever — all controlled by AI without touching your codebase.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon blue">🧪</div>
+        <h3>A/B Testing</h3>
+        <p>Run statistically valid experiments with automatic winner detection and traffic splitting.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon purple">🤖</div>
+        <h3>AI Suggestions</h3>
+        <p>Our AI analyses DOM inventory and proposes high-impact copy and layout changes.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon green">🚩</div>
+        <h3>Feature Flags</h3>
+        <p>Safely rollout new features to any user segment without redeploying your app.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon orange">⚡</div>
+        <h3>Real-time SDK</h3>
+        <p>Changes propagate to all users instantly — no page reloads, no deploy pipelines.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon pink">📊</div>
+        <h3>Analytics Bridge</h3>
+        <p>DOM events are captured and streamed to your analytics warehouse automatically.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon teal">🔒</div>
+        <h3>Privacy First</h3>
+        <p>Self-hosted, no data leaves your infrastructure. GDPR-compliant by default.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▓▓ BLOCK 4 — PROMO BANNER ▓▓ -->
+  <section class="block" id="block-promo" data-block="promo">
+    <div>
+      <span class="promo-badge">🎉 Limited offer</span>
+      <h2>Get 3 months free on any plan</h2>
+      <p>No credit card required · Cancel any time · Setup in 5 minutes</p>
+    </div>
+    <button class="btn btn-primary" type="button">Claim offer →</button>
+  </section>
+
+  <!-- ▓▓ BLOCK 5 — PRODUCTS ▓▓ -->
+  <section class="block" id="block-products" data-block="products">
+    <div class="section-label">Our plans</div>
+    <h2 style="margin-bottom:24px;">Pick the right package</h2>
+    <div class="products-grid">
+      <div class="product-card">
+        <div class="product-thumb" style="background:#f0f4ff;">🚀</div>
+        <div class="product-body">
+          <h3>Starter</h3>
+          <div><span class="price">$0</span></div>
+          <p style="font-size:13px;color:#888;margin-top:6px;">Up to 2 experiments, 1 seat</p>
+          <button class="btn btn-secondary" style="width:100%;margin-top:10px;">Get started</button>
+        </div>
+      </div>
+      <div class="product-card">
+        <div class="product-thumb" style="background:#eef2ff;">⚗️</div>
+        <div class="product-body">
+          <h3>Growth</h3>
+          <div><span class="price">$49</span><span class="old-price">$79</span></div>
+          <p style="font-size:13px;color:#888;margin-top:6px;">Unlimited experiments, 5 seats</p>
+          <button class="btn btn-primary" style="width:100%;margin-top:10px;">Buy now</button>
+        </div>
+      </div>
+      <div class="product-card">
+        <div class="product-thumb" style="background:#fdf4ff;">🧬</div>
+        <div class="product-body">
+          <h3>Scale</h3>
+          <div><span class="price">$149</span><span class="old-price">$199</span></div>
+          <p style="font-size:13px;color:#888;margin-top:6px;">AI features, 20 seats, SLA</p>
+          <button class="btn btn-dark" style="width:100%;margin-top:10px;">Contact sales</button>
+        </div>
+      </div>
+      <div class="product-card">
+        <div class="product-thumb" style="background:#f0fdf4;">🏢</div>
+        <div class="product-body">
+          <h3>Enterprise</h3>
+          <div><span class="price">Custom</span></div>
+          <p style="font-size:13px;color:#888;margin-top:6px;">Self-hosted, SSO, dedicated support</p>
+          <button class="btn btn-secondary" style="width:100%;margin-top:10px;">Talk to us</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▓▓ BLOCK 6 — TESTIMONIALS ▓▓ -->
+  <section class="block" id="block-testimonials" data-block="testimonials">
+    <div class="section-label">Social proof</div>
+    <h2 style="margin-bottom:24px;">Loved by product teams</h2>
+    <div class="testimonials-grid">
+      <div class="testimonial-card">
+        <div class="testimonial-stars">★★★★★</div>
+        <p class="testimonial-text">"We launched 12 experiments in one sprint without a single backend deploy. Absolutely game-changing."</p>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">👩‍💻</div>
+          <div>
+            <div class="testimonial-name">Olena Kovalenko</div>
+            <div class="testimonial-role">Head of Product, Fintech UA</div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial-card">
+        <div class="testimonial-stars">★★★★★</div>
+        <p class="testimonial-text">"The AI bridge scans our DOM and tells us exactly what to test next. CVR is up 18 % in two months."</p>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">👨‍🔬</div>
+          <div>
+            <div class="testimonial-name">Dmytro Shevchenko</div>
+            <div class="testimonial-role">Growth Lead, E-commerce Co.</div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial-card">
+        <div class="testimonial-stars">★★★★☆</div>
+        <p class="testimonial-text">"Self-hosted in our DO Droplet in 20 minutes. Security team approved it same day. Highly recommend."</p>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">🧑‍💼</div>
+          <div>
+            <div class="testimonial-name">Artem Bondarenko</div>
+            <div class="testimonial-role">CTO, SaaS Startup</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▓▓ BLOCK 7 — HOW IT WORKS ▓▓ -->
+  <section class="block" id="block-how-it-works" data-block="how-it-works">
+    <div class="section-label">Process</div>
+    <h2 style="margin-bottom:24px;">How it works</h2>
+    <div class="steps-grid">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Add one script tag</h3>
+        <p>Drop our SDK tag into your HTML. Zero framework dependencies.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Bridge scans DOM</h3>
+        <p>The AI bridge inventories headings, CTAs and block structure automatically.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>AI proposes changes</h3>
+        <p>Our assistant suggests copy tweaks and layout reorders via GrowthBook recipes.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h3>Ship & measure</h3>
+        <p>Events flow into your analytics. Winners are promoted, losers are rolled back.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▓▓ BLOCK 8 — CTA ▓▓ -->
+  <section class="block" id="block-cta" data-block="cta">
+    <h2>Ready to supercharge your experiments?</h2>
+    <p>Join thousands of product teams who ship smarter with GrowthBook AI.</p>
+    <div class="cta-actions">
+      <button class="btn btn-primary" type="button">Start for free</button>
+      <button class="btn" style="background:rgba(255,255,255,0.15);color:#fff;" type="button">Read docs</button>
+    </div>
+  </section>
+
+  <!-- ▓▓ BLOCK 9 — DEBUG / DOM Inventory ▓▓ -->
+  <section class="block" id="block-debug" data-block="debug">
+    <h3>🛠 DOM Inventory (debug)</h3>
+    <p style="color:#7799cc;font-size:13px;margin-bottom:10px;">
+      SDK host: <code id="apiHost" style="background:rgba(255,255,255,0.1);color:#5cf;"></code>
+    </p>
+    <div id="inv" class="inv">Loading…</div>
+  </section>
+
+</div><!-- /page-wrapper -->
 
 
-
-<!-- 1) GrowthBook HTML Script Tag SDK (auto.min.js) -->
+<!-- ─── GrowthBook SDK ─── -->
 <script>
-  // Queue for HTML SDK — must be BEFORE auto.min.js loads.
   window.growthbook_queue = window.growthbook_queue || [];
   window.growthbook_queue.push((gb) => {
-    console.log("[GB] SDK ready, attaching to window.growthbook");
+    console.log("[GB] SDK ready");
     window.growthbook = gb;
 
-    // Set id attribute BEFORE features are evaluated so experiment bucketing works correctly.
-    // Priority: gb_tag cookie → gbuuid cookie → anonymous UUID
-    const _rc = (n) => { const c = document.cookie.split("; ").find(r => r.startsWith(n + "=")); return c ? c.split("=").slice(1).join("=") : null; };
+    const _rc  = (n) => { const c = document.cookie.split("; ").find(r => r.startsWith(n + "=")); return c ? c.split("=").slice(1).join("=") : null; };
     const _uid = _rc("gb_tag") || _rc("gbuuid") || ("anon-" + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10));
 
     try {
       const base = (typeof gb.getAttributes === "function" && gb.getAttributes()) || {};
-      gb.setAttributes({
-        ...base,
-        id: _uid,             // KEY: GB uses "id" as hashAttribute for experiment rules
-        url: location.href,
-        device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop",
-        sessionTag: _uid
-      });
+      gb.setAttributes({ ...base, id: _uid, url: location.href, device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop", sessionTag: _uid });
       console.log("[GB] attributes set: id=", _uid);
-    } catch (e) {
-      console.warn("[GB] setAttributes failed", e);
-    }
+    } catch (e) { console.warn("[GB] setAttributes failed", e); }
 
     try {
       const all = (typeof gb.getAllFeatures === "function" ? gb.getAllFeatures() : gb.features) || {};
-      console.log("[GB] feature keys from SDK:", Object.keys(all));
-    } catch (e) {
-      console.warn("[GB] error reading features", e);
-    }
+      console.log("[GB] features:", Object.keys(all));
+    } catch (e) { console.warn("[GB] error reading features", e); }
 
-    if (window.gbDomBridgeApply) {
-      window.gbDomBridgeApply();
-    }
+    if (window.gbDomBridgeApply) window.gbDomBridgeApply();
   });
 </script>
 
@@ -130,10 +551,8 @@
         data-api-host="http://localhost:3100"
 ></script>
 
-<!-- 2) DOM-місток -->
+<!-- DOM-місток -->
 <script src="/ai-bridge.js"></script>
-
-
 
 </body>
 </html>
