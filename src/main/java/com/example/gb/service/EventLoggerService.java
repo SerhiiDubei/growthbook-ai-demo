@@ -59,7 +59,10 @@ public class EventLoggerService {
         try {
             ExperimentEvent e = new ExperimentEvent();
 
-            experimentRepo.findByFeatureKey(featureKey)
+            // Prefer ACTIVE experiment; fall back to most-recently-updated if none active
+            experimentRepo.findFirstByFeatureKeyAndStatusOrderByUpdatedAtDesc(
+                            featureKey, com.example.gb.model.enums.ExperimentStatus.ACTIVE)
+                    .or(() -> experimentRepo.findFirstByFeatureKeyOrderByUpdatedAtDesc(featureKey))
                     .ifPresent(e::setExperiment);
 
             e.setFeatureKey(featureKey);

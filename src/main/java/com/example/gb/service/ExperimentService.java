@@ -167,8 +167,19 @@ public class ExperimentService {
         Experiment saved = experimentRepo.save(e);
 
         try {
-            gbSync.upsertRecipe(saved);
+            // Use upsertRecipeWithVariants when variants exist:
+            // this updates native GB Experiment status → running AND re-fetches variation IDs via GET,
+            // so upsertExperimentRefRule gets proper variationIds (not empty variations:[]).
+            List<ExperimentVariant> variants =
+                    variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(id);
+            if (variants.isEmpty()) {
+                gbSync.upsertRecipe(saved);
+            } else {
+                GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(saved, variants);
+                persistGbIds(saved, variants, syncResult);
+            }
             gbSync.enable(saved);
+            gbSync.syncStatus(saved);   // backup status patch → running
 
             eventWriter.lifecycle(saved, "start", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "enabled"), null);
@@ -205,6 +216,7 @@ public class ExperimentService {
 
         try {
             gbSync.disable(saved);
+            gbSync.syncStatus(saved);   // sync GB Experiment status → stopped
 
             eventWriter.lifecycle(saved, "pause", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "disabled"), null);
@@ -238,8 +250,16 @@ public class ExperimentService {
         Experiment saved = experimentRepo.save(e);
 
         try {
-            gbSync.upsertRecipe(saved);
+            List<ExperimentVariant> variants =
+                    variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(id);
+            if (variants.isEmpty()) {
+                gbSync.upsertRecipe(saved);
+            } else {
+                GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(saved, variants);
+                persistGbIds(saved, variants, syncResult);
+            }
             gbSync.enable(saved);
+            gbSync.syncStatus(saved);   // backup status patch → running
 
             eventWriter.lifecycle(saved, "resume", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "enabled"), null);
@@ -282,6 +302,7 @@ public class ExperimentService {
 
         try {
             gbSync.disable(saved);
+            gbSync.syncStatus(saved);   // sync GB Experiment status → stopped
 
             eventWriter.lifecycle(saved, "finish", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "disabled"), null);
@@ -325,6 +346,7 @@ public class ExperimentService {
 
         try {
             gbSync.disable(saved);
+            gbSync.syncStatus(saved);   // sync GB Experiment status → stopped
 
             eventWriter.lifecycle(saved, "fail", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "disabled"), null);
@@ -361,6 +383,7 @@ public class ExperimentService {
 
         try {
             gbSync.disable(saved);
+            gbSync.syncStatus(saved);   // sync GB Experiment status → draft
 
             eventWriter.lifecycle(saved, "reset", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "disabled"), null);

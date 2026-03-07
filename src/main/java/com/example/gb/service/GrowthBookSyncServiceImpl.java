@@ -3,6 +3,8 @@ package com.example.gb.service;
 import com.example.gb.model.Experiment;
 import com.example.gb.model.ExperimentVariant;
 import com.example.gb.model.enums.ExperimentStatus;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,7 @@ import java.util.List;
 public class GrowthBookSyncServiceImpl implements GrowthBookSyncService {
 
     private final GbAdminService gb;
+    private final ObjectMapper om;
 
     private final Duration timeout = Duration.ofSeconds(10);
 
@@ -62,13 +65,16 @@ public class GrowthBookSyncServiceImpl implements GrowthBookSyncService {
                 .block();
 
         // 2. Create or update native GB Experiment
-        String gbStatus = mapToGbStatus(exp.getStatus());
+        // Pass raw ExperimentStatus name (ACTIVE/PAUSED/DRAFT/FINISHED) so that
+        // GbAdminService.mapStatus() can correctly map it to GB values (running/stopped/draft).
+        // Do NOT pre-map here — mapToGbStatus + mapStatus would double-map and produce "draft".
+        String rawStatus = exp.getStatus() != null ? exp.getStatus().name() : "DRAFT";
         GbAdminService.NativeExperimentResult nativeResult = gb.ensureNativeExperiment(
                 exp.getGbExperimentId(),
                 exp.getKey(),
                 exp.getTitle(),
                 exp.getDescription(),
-                gbStatus,
+                rawStatus,
                 variants
         ).timeout(timeout).block();
 
@@ -122,6 +128,57 @@ public class GrowthBookSyncServiceImpl implements GrowthBookSyncService {
         gb.setFeatureEnabled(featureKey, false, "production")
                 .timeout(timeout)
                 .block();
+    }
+
+    /**
+     * Syncs the native GrowthBook Experiment status to match our local ExperimentStatus.
+     * No-op if no gbExperimentId. Best-effort: never throws.
+     */
+    @Override
+    public void syncStatus(Experiment exp) {
+        String gbExpId = exp.getGbExperimentId();
+        if (gbExpId == null || gbExpId.isBlank()) {
+            log.debug("[GB sync] syncStatus skipped — no gbExperimentId for expId={}", exp.getId());
+            return;
+        }
+
+        String gbStatus = mapToGbStatus(exp.getStatus());
+        log.info("🔄 [GB sync] syncStatus expId={} gbExpId={} → {}", exp.getId(), gbExpId, gbStatus);
+
+        try {
+            gb.updateNativeExperimentStatus(gbExpId, gbStatus)
+                    .timeout(timeout)
+                    .block();
+            log.info("✅ [GB sync] syncStatus OK gbExpId={} status={}", gbExpId, gbStatus);
+        } catch (Exception e) {
+            log.warn("⚠️ [GB sync] syncStatus failed gbExpId={} status={} err={}",
+                    gbExpId, gbStatus, e.getMessage());
+        }
+    }
+
+    /**
+     * Fetches the current status of the native GrowthBook Experiment from the API.
+     * Returns null if no gbExperimentId or the API call fails.
+     */
+    @Override
+    public String fetchGbStatus(Experiment exp) {
+        String gbExpId = exp.getGbExperimentId();
+        if (gbExpId == null || gbExpId.isBlank()) return null;
+
+        try {
+            String raw = gb.getNativeExperimentRaw(gbExpId)
+                    .timeout(timeout)
+                    .block();
+            if (raw == null || raw.isBlank()) return null;
+
+            JsonNode root = om.readTree(raw);
+            JsonNode expNode = root.has("experiment") ? root.get("experiment") : root;
+            String status = expNode.path("status").asText(null);
+            return (status == null || status.isBlank()) ? null : status;
+        } catch (Exception e) {
+            log.warn("⚠️ [GB sync] fetchGbStatus failed gbExpId={} err={}", gbExpId, e.getMessage());
+            return null;
+        }
     }
 
     private static String mapToGbStatus(ExperimentStatus status) {

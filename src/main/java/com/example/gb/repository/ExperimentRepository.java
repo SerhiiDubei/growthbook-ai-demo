@@ -17,6 +17,9 @@ public interface ExperimentRepository extends JpaRepository<Experiment, Long> {
 
     long countByStatus(ExperimentStatus status);
 
-    Optional<Experiment> findByFeatureKey(String featureKey);
+    // Prefer ACTIVE experiment if multiple share the same featureKey
+    Optional<Experiment> findFirstByFeatureKeyAndStatusOrderByUpdatedAtDesc(String featureKey, ExperimentStatus status);
+
+    Optional<Experiment> findFirstByFeatureKeyOrderByUpdatedAtDesc(String featureKey);
 
 }

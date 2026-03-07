@@ -28,6 +28,20 @@ public interface GrowthBookSyncService {
     void disable(Experiment exp);
 
     /**
+     * Syncs the native GrowthBook Experiment status to match our local status.
+     * Called after every lifecycle transition (start/pause/finish/fail/reset).
+     * No-op if experiment has no gbExperimentId yet.
+     * Best-effort: logs but does not throw on failure.
+     */
+    void syncStatus(Experiment exp);
+
+    /**
+     * Fetches the current status of the native GrowthBook Experiment from the API.
+     * Returns null if the experiment has no gbExperimentId or the API call fails.
+     */
+    String fetchGbStatus(Experiment exp);
+
+    /**
      * Result of syncing an experiment with variants to GrowthBook.
      * Contains native GB Experiment ID and per-variant GB Variation ID mapping.
      */

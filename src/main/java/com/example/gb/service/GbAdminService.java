@@ -588,6 +588,7 @@ public class GbAdminService {
 
         Mono<String> request;
         if (existingGbExpId == null || existingGbExpId.isBlank()) {
+            // CREATE: response contains full experiment with variation IDs
             request = admin.post()
                     .uri("/experiments")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -596,13 +597,18 @@ public class GbAdminService {
                     .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB createNativeExp error"))
                     .bodyToMono(String.class);
         } else {
+            // UPDATE: response may not contain variation IDs → do GET afterwards to get fresh data
             request = admin.post()
                     .uri("/experiments/{id}", existingGbExpId)
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(body)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB updateNativeExp error"))
-                    .bodyToMono(String.class);
+                    .bodyToMono(String.class)
+                    .flatMap(ignored -> {
+                        log.debug("📥 [GB] UPDATE done, fetching fresh experiment data id={}", existingGbExpId);
+                        return getNativeExperimentRaw(existingGbExpId);
+                    });
         }
 
         return request.map(raw -> parseNativeExperimentResult(raw, variants));
@@ -658,10 +664,11 @@ public class GbAdminService {
     private String mapStatus(String status) {
         if (status == null) return "draft";
         return switch (status.toUpperCase()) {
-            case "ACTIVE" -> "running";
-            case "FINISHED" -> "stopped";
-            case "PAUSED"  -> "stopped";
-            default        -> "draft";
+            case "ACTIVE"                  -> "running";
+            case "FINISHED", "PAUSED",
+                 "FAILED", "STOPPED"       -> "stopped";
+            case "RUNNING"                 -> "running";  // pass-through if already GB format
+            default                        -> "draft";
         };
     }
 
@@ -685,7 +692,12 @@ public class GbAdminService {
                 String gbVariationId = null;
 
                 if (gbVariations.isArray() && i < gbVariations.size()) {
-                    gbVariationId = gbVariations.get(i).path("id").asText(null);
+                    JsonNode varNode = gbVariations.get(i);
+                    // GB REST API returns "variationId" (not "id")
+                    gbVariationId = varNode.path("variationId").asText(null);
+                    if (gbVariationId == null || gbVariationId.isBlank()) {
+                        gbVariationId = varNode.path("id").asText(null); // fallback
+                    }
                 }
                 if (gbVariationId != null && !gbVariationId.isBlank()) {
                     result.put(variantKey, gbVariationId);
@@ -762,6 +774,221 @@ public class GbAdminService {
         }
         rule.set("variations", variations);
         return rule;
+    }
+
+    // -------------------------------------------------------------------------
+    // NATIVE GB EXPERIMENTS — full-featured create / get / list / status update
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a new native GrowthBook Experiment with full targeting support.
+     *
+     * @param trackingKey        unique tracking key
+     * @param name               human-readable name
+     * @param description        optional description
+     * @param hypothesis         optional hypothesis
+     * @param variationsJson     JSON array: [{"key":"control","name":"Control"}, ...]
+     * @param weightsJson        JSON array: [0.5, 0.5]
+     * @param targetingCondition JSON condition: {} = all, {"country":"UA"}, etc.
+     * @param coverage           traffic coverage 0.0..1.0
+     * @param status             draft | running | stopped
+     * @return raw JSON response from GrowthBook API
+     */
+    public Mono<String> createNativeExperimentFull(
+            String trackingKey,
+            String name,
+            String description,
+            String hypothesis,
+            String variationsJson,
+            String weightsJson,
+            String targetingCondition,
+            double coverage,
+            String status) {
+
+        ObjectNode body = buildFullNativeExpBody(
+                trackingKey, name, description, hypothesis,
+                variationsJson, weightsJson, targetingCondition, coverage, status);
+
+        log.info("🧪 [GB] createNativeExperimentFull trackingKey={} status={}", trackingKey, status);
+        try {
+            log.debug("📤 [GB] createNativeExpFull body={}", shortBody(om.writeValueAsString(body)));
+        } catch (Exception ignored) {}
+
+        return admin.post()
+                .uri("/experiments")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB createNativeExpFull error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.info("✅ [GB] createNativeExpFull OK len={}", r.length()));
+    }
+
+    /**
+     * Updates an existing native GrowthBook Experiment.
+     */
+    public Mono<String> updateNativeExperimentFull(
+            String gbExperimentId,
+            String name,
+            String description,
+            String hypothesis,
+            String variationsJson,
+            String weightsJson,
+            String targetingCondition,
+            double coverage,
+            String status) {
+
+        ObjectNode body = buildFullNativeExpBody(
+                null, name, description, hypothesis,
+                variationsJson, weightsJson, targetingCondition, coverage, status);
+
+        log.info("🔄 [GB] updateNativeExperimentFull id={} status={}", gbExperimentId, status);
+
+        return admin.post()
+                .uri("/experiments/{id}", gbExperimentId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB updateNativeExpFull error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.info("✅ [GB] updateNativeExpFull OK id={}", gbExperimentId));
+    }
+
+    /**
+     * Updates only the status of an existing native GrowthBook Experiment.
+     * status: draft | running | stopped | archived
+     */
+    public Mono<String> updateNativeExperimentStatus(String gbExperimentId, String newStatus) {
+        ObjectNode body = om.createObjectNode();
+        body.put("status", newStatus);
+
+        log.info("🔀 [GB] updateNativeExperimentStatus id={} → {}", gbExperimentId, newStatus);
+
+        return admin.post()
+                .uri("/experiments/{id}", gbExperimentId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB updateNativeExpStatus error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.info("✅ [GB] updateNativeExpStatus OK id={}", gbExperimentId));
+    }
+
+    /**
+     * Gets a native GrowthBook Experiment by its GB ID.
+     */
+    public Mono<String> getNativeExperimentRaw(String gbExperimentId) {
+        log.debug("➡️ [GB] GET /experiments/{}", gbExperimentId);
+        return admin.get()
+                .uri("/experiments/{id}", gbExperimentId)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB getNativeExp error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.debug("📥 [GB] getNativeExp OK id={} ({} bytes)", gbExperimentId, r.length()));
+    }
+
+    /**
+     * Lists native GrowthBook Experiments.
+     */
+    public Mono<String> listNativeExperimentsRaw(int limit, int offset) {
+        int safeLimit = Math.min(Math.max(1, limit), 100);
+        int safeOffset = Math.max(0, offset);
+        log.debug("➡️ [GB] GET /experiments limit={} offset={}", safeLimit, safeOffset);
+        return admin.get()
+                .uri(u -> u.path("/experiments").queryParam("limit", safeLimit).queryParam("offset", safeOffset).build())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB listNativeExps error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.debug("📦 [GB] listNativeExps OK ({} bytes)", r.length()));
+    }
+
+    /**
+     * Extracts the GB experiment ID from a createNativeExperimentFull response.
+     */
+    public String extractGbExpId(String raw) {
+        try {
+            JsonNode root = om.readTree(raw);
+            JsonNode expNode = root.has("experiment") ? root.get("experiment") : root;
+            String id = expNode.path("id").asText(null);
+            if (id == null || id.isBlank()) throw new IllegalStateException("no id in response");
+            return id;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to extract GB experiment id: " + e.getMessage(), e);
+        }
+    }
+
+    private ObjectNode buildFullNativeExpBody(
+            String trackingKey,
+            String name,
+            String description,
+            String hypothesis,
+            String variationsJson,
+            String weightsJson,
+            String targetingCondition,
+            double coverage,
+            String status) {
+
+        ObjectNode body = om.createObjectNode();
+        if (trackingKey != null && !trackingKey.isBlank()) body.put("trackingKey", trackingKey);
+        body.put("name", (name != null && !name.isBlank()) ? name : (trackingKey != null ? trackingKey : "Unnamed"));
+        if (description != null && !description.isBlank()) body.put("description", description);
+        if (hypothesis != null && !hypothesis.isBlank()) body.put("hypothesis", hypothesis);
+        body.put("project", project);
+        body.put("hashAttribute", "id");
+        body.put("status", mapStatus(status));
+        body.put("assignmentQueryId", "");
+
+        // Variations
+        var variationsArr = om.createArrayNode();
+        var weightsArr = om.createArrayNode();
+
+        try {
+            JsonNode vars = om.readTree(variationsJson == null || variationsJson.isBlank() ? "[]" : variationsJson);
+            JsonNode wts = om.readTree(weightsJson == null || weightsJson.isBlank() ? "[]" : weightsJson);
+
+            for (int i = 0; i < vars.size(); i++) {
+                JsonNode v = vars.get(i);
+                ObjectNode variation = om.createObjectNode();
+                variation.put("key", v.path("key").asText(String.valueOf(i)));
+                variation.put("name", v.path("name").asText(v.path("key").asText("Variation " + i)));
+                variation.set("screenshots", om.createArrayNode());
+                variationsArr.add(variation);
+
+                double w = (wts.isArray() && i < wts.size()) ? wts.get(i).asDouble(0.5) : (1.0 / Math.max(1, vars.size()));
+                weightsArr.add(w);
+            }
+        } catch (Exception e) {
+            log.warn("[GB] Failed to parse variationsJson/weightsJson: {}", e.getMessage());
+            // Fallback: two equal variants
+            for (String vKey : new String[]{"control", "treatment"}) {
+                ObjectNode v = om.createObjectNode();
+                v.put("key", vKey); v.put("name", vKey); v.set("screenshots", om.createArrayNode());
+                variationsArr.add(v);
+                weightsArr.add(0.5);
+            }
+        }
+        body.set("variations", variationsArr);
+
+        // Phase with targeting
+        String cond = (targetingCondition == null || targetingCondition.isBlank()) ? "{}" : targetingCondition;
+        double cov = Math.max(0.0, Math.min(1.0, coverage));
+
+        ObjectNode phase = om.createObjectNode();
+        phase.put("name", "Main");
+        phase.put("dateStarted", java.time.Instant.now().toString());
+        phase.put("coverage", cov);
+        phase.set("variationWeights", weightsArr.deepCopy());
+        phase.put("condition", cond);
+
+        ObjectNode ns = om.createObjectNode();
+        ns.put("enabled", false);
+        ns.put("namespaceId", "");
+        ns.put("name", "");
+        ns.set("range", om.createArrayNode().add(0).add(1));
+        phase.set("namespace", ns);
+
+        body.set("phases", om.createArrayNode().add(phase));
+        return body;
     }
 
     // -------------------------------------------------------------------------
