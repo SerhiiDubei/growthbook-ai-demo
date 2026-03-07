@@ -6,9 +6,10 @@
 target/
 !.mvn/wrapper/maven-wrapper.jar
 
-# Env / secrets
+# Env / secrets (приклад залишається в репо, реальні значення — ні)
 .env
 .env.*
+!.env.example
 
 # OS
 .DS_Store

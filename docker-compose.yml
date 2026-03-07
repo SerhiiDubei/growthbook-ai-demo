@@ -8,34 +8,33 @@ services:
     depends_on:
       - growthbook
       - mongo
-      - events-postgres        # ⬅ додали залежність від Postgres
+      - events-postgres
     networks: [appnet]
-    environment:
-      SPRING_PROFILES_ACTIVE: dev
-
+    restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "5"
+
   growthbook:
     image: growthbook/growthbook
     container_name: growthbook
     environment:
       - MONGODB_URI=mongodb://mongo:27017/growthbook
       - NODE_ENV=production
-      - ENCRYPTION_KEY=zXgROa2/iBZ+sdqR3eHOwhfkKqrVhBFwoaZaasxiB4M=
-      - JWT_SECRET=AvuC3hJxssx1gcGESL3E3dO5iSKCYD76EDwiQF7GH/o=
+      - ENCRYPTION_KEY=${GB_ENCRYPTION_KEY}
+      - JWT_SECRET=${GB_JWT_SECRET}
       - ENABLE_ADMIN_API=true
       - ADMIN_API_KEYS=${GB_ADMIN_TOKEN}
-      - APP_ORIGIN=http://localhost:3000
+      - APP_ORIGIN=${GB_APP_ORIGIN:-http://localhost:3000}
     ports:
       - "3000:3000"  # UI
       - "3100:3100"  # Admin/API
     depends_on:
       - mongo
     networks: [appnet]
-
+    restart: unless-stopped
     logging:
       driver: "json-file"
       options:
@@ -48,29 +47,28 @@ services:
     volumes:
       - mongo_data:/data/db
     networks: [appnet]
-
+    restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "5"
 
-  # 🆕 Postgres для подій/аналітики
   events-postgres:
     image: postgres:16-alpine
     container_name: events-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: gb_events
-      POSTGRES_USER: gb_user
-      POSTGRES_PASSWORD: gb_password
-    ports:
-      - "5433:5432"        # ззовні 5433, всередині 5432 (щоб не конфліктувати з локальним 5432)
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # Порт НЕ відкривається назовні — доступ тільки через внутрішню мережу appnet
+    expose:
+      - "5432"
     volumes:
       - events_pg_data:/var/lib/postgresql/data
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks: [appnet]
-
     logging:
       driver: "json-file"
       options:
@@ -82,4 +80,4 @@ networks:
 
 volumes:
   mongo_data:
-  events_pg_data:   # 🆕 volume для збереження даних Postgres
+  events_pg_data:
