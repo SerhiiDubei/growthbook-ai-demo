@@ -42,7 +42,9 @@ public class ExperimentTools {
     // ------------------------------------------------------------
 
     @Tool("""
-          Create an experiment in DRAFT status and sync skeleton+recipe to GrowthBook (disabled).
+          Create an experiment in DRAFT status and sync skeleton to GrowthBook (disabled).
+          The experiment is created with an empty recipe {"ops":[]} — variants are added
+          separately via RecipeTools (addControlVariant, addSwapVariant, addReorderVariant, etc.).
           featureKey cannot be changed later by the agent.
           Returns JSON: {ok,id,status,pageKey,key,featureKey}
           """)
@@ -55,14 +57,11 @@ public class ExperimentTools {
             @P("GrowthBook feature key") String featureKey,
             @P("Owner (optional)") String owner,
             @P("Primary metric (optional)") String primaryMetric,
-            @P("Notes (optional)") String notes,
-            @P("Recipe JSON object string, e.g. {\"ops\":[]}") String recipeJson,
+            @P(value = "Notes (optional)", required = false) String notes,
             @P(value = "Autonomy level, e.g. AGENT_FULL (optional)", required = false) String autonomyLevel
     ) {
         try {
             log.info("[EXP TOOL] createExperiment pageKey={} key={} featureKey={}", pageKey, key, featureKey);
-
-            validateJsonObject(recipeJson, "recipeJson");
 
             CreateExperimentRequest req = new CreateExperimentRequest();
             req.setPageKey(pageKey);
@@ -74,7 +73,7 @@ public class ExperimentTools {
             req.setOwner(owner);
             req.setPrimaryMetric(primaryMetric);
             req.setNotes(notes);
-            req.setRecipeJson(recipeJson);
+            req.setRecipeJson("{\"ops\":[]}");
 
             AutonomyLevel lvl = parseAutonomy(autonomyLevel);
             req.setAutonomyLevel(lvl == null ? AutonomyLevel.AGENT_FULL : lvl);
@@ -353,20 +352,13 @@ public class ExperimentTools {
     // A/B VARIANTS
     // ------------------------------------------------------------
 
-    @Tool("""
-          Add an A/B variant to an experiment (must be DRAFT or PAUSED).
-          Always add at least 2 variants: "control" (weight=0.5, recipeJson={"ops":[]}) and
-          one or more treatment variants (weight=0.5, recipeJson with actual ops).
-          Weights across all variants MUST sum to 1.0.
-          Returns JSON: {ok, variantId, key, name, weight, experimentId}
-          """)
+    /**
+     * Kept for internal/legacy use but hidden from the agent.
+     * Agents must use RecipeTools (addControlVariant, addSwapVariant, etc.) instead.
+     */
     public String addVariant(
-            @P("Experiment id") long experimentId,
-            @P("Variant key: 'control', 'treatment', 'A', 'B' (immutable after creation)") String key,
-            @P("Human-readable name, e.g. 'Control' or 'Yellow Button'") String name,
-            @P("Traffic weight 0.0..1.0 (e.g. 0.5 for 50%). All variants must sum to 1.0") double weight,
-            @P("Recipe JSON for this variant. Control = '{\"ops\":[]}'. Treatment = recipe with actual ops.") String recipeJson,
-            @P(value = "Sort order (0=first, optional)", required = false) Integer sortOrder
+            long experimentId, String key, String name, double weight,
+            String recipeJson, Integer sortOrder
     ) {
         try {
             log.info("[EXP TOOL] addVariant experimentId={} key={} weight={}", experimentId, key, weight);
