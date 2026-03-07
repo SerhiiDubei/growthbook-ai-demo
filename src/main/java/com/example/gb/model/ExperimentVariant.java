@@ -1,6 +1,7 @@
 package com.example.gb.model;
 
 import com.example.gb.model.base.AbstractVersional;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -33,6 +34,7 @@ public class ExperimentVariant extends AbstractVersional {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "experiment_id", nullable = false)
+    @JsonIgnoreProperties({"variants", "hibernateLazyInitializer", "handler"})
     private Experiment experiment;
 
     /**
