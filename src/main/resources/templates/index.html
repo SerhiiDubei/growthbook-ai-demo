@@ -78,6 +78,9 @@
     #block-hero .hero-text { flex: 1; }
     #block-hero h1 { color: #fff; }
     #block-hero p  { color: #b0c4ff; font-size: 1.1rem; }
+    /* backward-compat aliases */
+    #block-hero .site-title { color: #fff; }
+    #block-hero .muted { color: #b0c4ff; }
     #block-hero .hero-badge {
       display: inline-block;
       background: rgba(255,255,255,0.12);
@@ -294,13 +297,13 @@
 <div class="page-wrapper">
 
   <!-- ▓▓ BLOCK 1 — HERO ▓▓ -->
-  <section class="block" id="block-hero" data-block="hero">
+  <section class="block hero" id="block-hero" data-block="hero">
     <div class="hero-text">
       <span class="hero-badge">✦ Powered by GrowthBook AI</span>
-      <h1>Organize your work<br>smarter, faster</h1>
-      <p>AI-driven feature flags and A/B experiments that adapt your UI in real time — without a deploy.</p>
+      <h1 class="site-title">Organize your work<br>smarter, faster</h1>
+      <p class="muted">AI-driven feature flags and A/B experiments that adapt your UI in real time — without a deploy.</p>
       <div class="hero-actions">
-        <button class="btn btn-primary" id="btn-try-now" type="button">Try now</button>
+        <button class="btn btn-primary btn-cta" id="btn-try-now" type="button">Try now</button>
         <button class="btn btn-secondary" type="button">Watch demo</button>
       </div>
     </div>
