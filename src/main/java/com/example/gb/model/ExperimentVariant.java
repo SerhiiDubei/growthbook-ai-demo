@@ -69,4 +69,12 @@ public class ExperimentVariant extends AbstractVersional {
      */
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
+
+    /**
+     * Native GrowthBook variation ID (e.g. "var_abc123").
+     * Returned by GB inside experiment.variations[].id after native experiment sync.
+     * Required to build experiment-ref rules on features.
+     */
+    @Column(name = "gb_variation_id", length = 100)
+    private String gbVariationId;
 }

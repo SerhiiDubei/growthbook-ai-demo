@@ -168,4 +168,18 @@ public class ExperimentController {
         experimentService.deleteVariant(variantId, a);
         return ResponseEntity.noContent().build();
     }
+
+    /**
+     * Re-sync ALL non-terminal experiments to GrowthBook (DRAFT, ACTIVE, PAUSED).
+     * Use after upgrading GB rule type (e.g. force → experiment).
+     * POST /api/experiments/sync-all
+     */
+    @PostMapping("/sync-all")
+    public ResponseEntity<java.util.Map<Long, String>> syncAll(
+            @RequestHeader(value = "X-Actor", required = false) String actor
+    ) {
+        String a = actor(actor);
+        log.info("HTTP POST /api/experiments/sync-all actor={}", a);
+        return ResponseEntity.ok(experimentService.syncAllToGrowthBook());
+    }
 }

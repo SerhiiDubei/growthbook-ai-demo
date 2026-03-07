@@ -284,6 +284,10 @@ public class GbAdminService {
 
     private Mono<Void> postFeatureUpdate(String key, ObjectNode featureUpdate, String label) {
         // IMPORTANT: this GB API expects a "flat" feature object on UPDATE (no {"feature": ...})
+        try {
+            log.info("📤 [GB] {} POST /features/{} body={}",
+                    label, key, shortBody(om.writeValueAsString(featureUpdate)));
+        } catch (Exception _e) { /* ignore serialization error in log */ }
         return admin.post()
                 .uri("/features/{id}", key)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -457,24 +461,23 @@ public class GbAdminService {
     }
 
     // -------------------------------------------------------------------------
-    // A/B VARIANT RULES
+    // A/B VARIANT RULES  (experiment rule — GB SDK does bucketing client-side)
     // -------------------------------------------------------------------------
 
     /**
-     * Replaces all existing rules in production environment with one force rule per variant.
-     * Each rule is conditioned on { "__variant__": { "$eq": "variantKey" } }.
+     * Replaces feature rules with ONE native GB "experiment" type rule per environment.
      * <p>
-     * The bridge sets __variant__ in the GB attributes so GB SDK can also deliver
-     * the correct recipe without server-side bridge changes (future).
-     * <p>
-     * Rule order matches variant sortOrder (control first).
+     * GB SDK reads this rule, hashes gb.attributes.id (= sessionTag) and assigns
+     * the variant deterministically — no server round-trip per pageload.
+     * Each recipe value has {@code __variantKey__} injected so the bridge can
+     * identify the variant name without relying on numeric variation index.
      */
     public Mono<Void> upsertVariantRules(String featureKey, String experimentKey, List<ExperimentVariant> variants) {
         if (variants == null || variants.isEmpty()) {
             return Mono.empty();
         }
 
-        log.info("🔀 [GB] upsertVariantRules key={} expKey={} variants={}", featureKey, experimentKey, variants.size());
+        log.info("🔀 [GB] upsertExperimentRule key={} expKey={} variants={}", featureKey, experimentKey, variants.size());
 
         return getFeatureRaw(featureKey)
                 .flatMap(raw -> {
@@ -485,29 +488,12 @@ public class GbAdminService {
                                 ? (ObjectNode) feature.get("environments")
                                 : om.createObjectNode();
 
-                        // Replace rules in BOTH environments
                         for (String envName : List.of("production", "dev")) {
                             ObjectNode envObj = ensureEnvObject(envs, envName);
                             ensureEnabled(envObj);
-
                             var rules = om.createArrayNode();
-
-                            for (ExperimentVariant v : variants) {
-                                String condition = "{\"__variant__\":{\"$eq\":\"" + v.getKey() + "\"}}";
-                                Object value = gbJsonValue(
-                                        v.getRecipeJson() == null ? "{\"ops\":[]}" : v.getRecipeJson()
-                                );
-
-                                ObjectNode rule = om.createObjectNode();
-                                rule.put("type", "force");
-                                rule.put("enabled", true);
-                                rule.put("description", "A/B variant: " + v.getKey()
-                                        + " (" + String.format("%.0f%%", (v.getWeight() == null ? 0.5 : v.getWeight()) * 100) + ")");
-                                rule.put("condition", condition);
-                                putJsonValue(rule, "value", value);
-                                rules.add(rule);
-                            }
-
+                            // deep copy: each env gets its own independent rule node
+                            rules.add(buildExperimentRule(experimentKey, variants));
                             envObj.set("rules", rules);
                         }
 
@@ -516,12 +502,493 @@ public class GbAdminService {
                         updateFeature.put("owner", owner);
                         updateFeature.set("environments", envs);
 
-                        return postFeatureUpdate(featureKey, updateFeature, "upsertVariantRules");
+                        return postFeatureUpdate(featureKey, updateFeature, "upsertExperimentRule");
                     } catch (Exception e) {
                         return Mono.error(new RuntimeException(
-                                "upsertVariantRules failed for key=" + featureKey + ": " + e.getMessage(), e));
+                                "upsertExperimentRule failed for key=" + featureKey + ": " + e.getMessage(), e));
                     }
                 });
+    }
+
+    /**
+     * Builds a single GB "experiment" rule with one value entry per variant.
+     * hashAttribute = "id" → GB SDK uses gb.attributes.id for bucketing.
+     * Returns a fresh deep-copy each call so it is safe to add to multiple ArrayNodes.
+     */
+    private ObjectNode buildExperimentRule(String experimentKey, List<ExperimentVariant> variants) {
+        ObjectNode rule = om.createObjectNode();
+        rule.put("type", "experiment");
+        rule.put("trackingKey", experimentKey);
+        rule.put("hashAttribute", "id");
+        rule.put("coverage", 1);      // integer 1 = 100%
+        rule.put("condition", "{}");  // required by some GB versions
+
+        var values = om.createArrayNode();
+        for (ExperimentVariant v : variants) {
+            String enrichedRecipe = injectVariantKey(v.getRecipeJson(), v.getKey());
+            ObjectNode valueItem = om.createObjectNode();
+            putJsonValue(valueItem, "value", gbJsonValue(enrichedRecipe));
+            valueItem.put("weight", v.getWeight() == null ? 0.5 : v.getWeight());
+            values.add(valueItem);
+        }
+        rule.set("values", values);
+        return rule;
+    }
+
+    /**
+     * Injects {@code __variantKey__} into the recipe JSON so the frontend bridge
+     * can identify the assigned variant by name, not by numeric variation index.
+     */
+    private String injectVariantKey(String recipeJson, String variantKey) {
+        try {
+            String s = (recipeJson == null || recipeJson.isBlank()) ? "{}" : recipeJson;
+            ObjectNode recipe = (ObjectNode) om.readTree(s);
+            recipe.put("__variantKey__", variantKey);
+            return om.writeValueAsString(recipe);
+        } catch (Exception e) {
+            log.warn("[GB] Failed to inject __variantKey__ for variant={}: {}", variantKey, e.getMessage());
+            return recipeJson == null ? "{}" : recipeJson;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // NATIVE GB EXPERIMENTS  (POST /api/v1/experiments)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Result of creating/updating a native GB Experiment.
+     * Contains the GB experiment ID and a mapping of our variantKey → GB variationId.
+     */
+    public record NativeExperimentResult(
+            String gbExperimentId,
+            Map<String, String> variantKeyToVariationId   // e.g. "control" → "var_abc123"
+    ) {}
+
+    /**
+     * Creates or updates a native GrowthBook Experiment entity.
+     * <p>
+     * If {@code existingGbExpId} is null → POST /api/v1/experiments (create).
+     * Otherwise              → POST /api/v1/experiments/{id} (update).
+     * <p>
+     * Returns {@link NativeExperimentResult} with the GB experiment ID and
+     * per-variant mapping variantKey → gbVariationId.
+     */
+    public Mono<NativeExperimentResult> ensureNativeExperiment(
+            String existingGbExpId,
+            String trackingKey,
+            String name,
+            String description,
+            String status,
+            List<ExperimentVariant> variants) {
+
+        ObjectNode body = buildNativeExperimentBody(trackingKey, name, description, status, variants);
+
+        log.info("🧪 [GB] {} native experiment trackingKey={} status={}",
+                existingGbExpId == null ? "CREATE" : "UPDATE", trackingKey, status);
+
+        Mono<String> request;
+        if (existingGbExpId == null || existingGbExpId.isBlank()) {
+            // CREATE: response contains full experiment with variation IDs
+            request = admin.post()
+                    .uri("/experiments")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB createNativeExp error"))
+                    .bodyToMono(String.class);
+        } else {
+            // UPDATE: response may not contain variation IDs → do GET afterwards to get fresh data
+            request = admin.post()
+                    .uri("/experiments/{id}", existingGbExpId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB updateNativeExp error"))
+                    .bodyToMono(String.class)
+                    .flatMap(ignored -> {
+                        log.debug("📥 [GB] UPDATE done, fetching fresh experiment data id={}", existingGbExpId);
+                        return getNativeExperimentRaw(existingGbExpId);
+                    });
+        }
+
+        return request.map(raw -> parseNativeExperimentResult(raw, variants));
+    }
+
+    private ObjectNode buildNativeExperimentBody(
+            String trackingKey, String name, String description,
+            String status, List<ExperimentVariant> variants) {
+
+        ObjectNode body = om.createObjectNode();
+        body.put("trackingKey", trackingKey);
+        body.put("name", name == null || name.isBlank() ? trackingKey : name);
+        if (description != null && !description.isBlank()) body.put("description", description);
+        body.put("project", project);
+        body.put("hashAttribute", "id");
+        body.put("status", mapStatus(status));
+        body.put("assignmentQueryId", "");  // required by GB API; empty = no datasource
+
+        var variationsArr = om.createArrayNode();
+        var weightsArr = om.createArrayNode();
+
+        for (int i = 0; i < variants.size(); i++) {
+            ExperimentVariant v = variants.get(i);
+            ObjectNode variation = om.createObjectNode();
+            variation.put("key", String.valueOf(i));        // "0", "1", "2"...
+            variation.put("name", v.getName() != null ? v.getName() : v.getKey());
+            variation.set("screenshots", om.createArrayNode());
+            variationsArr.add(variation);
+            weightsArr.add(v.getWeight() == null ? 0.5 : v.getWeight());
+        }
+        body.set("variations", variationsArr);
+
+        // Build phase
+        ObjectNode phase = om.createObjectNode();
+        phase.put("name", "Main");
+        phase.put("dateStarted", java.time.Instant.now().toString());
+        phase.put("coverage", 1);
+        phase.set("variationWeights", weightsArr.deepCopy());
+        phase.put("condition", "{}");
+        ObjectNode ns = om.createObjectNode();
+        ns.put("enabled", false);
+        ns.put("namespaceId", "");  // required by GB API
+        ns.put("name", "");
+        ns.set("range", om.createArrayNode().add(0).add(1));
+        phase.set("namespace", ns);
+
+        body.set("phases", om.createArrayNode().add(phase));
+
+        log.debug("📤 [GB] nativeExperiment body={}", shortBody(body.toString()));
+        return body;
+    }
+
+    private String mapStatus(String status) {
+        if (status == null) return "draft";
+        return switch (status.toUpperCase()) {
+            case "ACTIVE"                  -> "running";
+            case "FINISHED", "PAUSED",
+                 "FAILED", "STOPPED"       -> "stopped";
+            case "RUNNING"                 -> "running";  // pass-through if already GB format
+            default                        -> "draft";
+        };
+    }
+
+    private NativeExperimentResult parseNativeExperimentResult(
+            String raw, List<ExperimentVariant> variants) {
+        try {
+            JsonNode root = om.readTree(raw);
+            JsonNode expNode = root.has("experiment") ? root.get("experiment") : root;
+
+            String gbExpId = expNode.path("id").asText(null);
+            if (gbExpId == null || gbExpId.isBlank()) {
+                throw new IllegalStateException("GB did not return experiment id. raw=" + shortBody(raw));
+            }
+
+            // Map variation index → gbVariationId, then map to our variantKey
+            JsonNode gbVariations = expNode.path("variations");
+            Map<String, String> result = new java.util.LinkedHashMap<>();
+
+            for (int i = 0; i < variants.size(); i++) {
+                String variantKey = variants.get(i).getKey();
+                String gbVariationId = null;
+
+                if (gbVariations.isArray() && i < gbVariations.size()) {
+                    JsonNode varNode = gbVariations.get(i);
+                    // GB REST API returns "variationId" (not "id")
+                    gbVariationId = varNode.path("variationId").asText(null);
+                    if (gbVariationId == null || gbVariationId.isBlank()) {
+                        gbVariationId = varNode.path("id").asText(null); // fallback
+                    }
+                }
+                if (gbVariationId != null && !gbVariationId.isBlank()) {
+                    result.put(variantKey, gbVariationId);
+                }
+            }
+
+            log.info("✅ [GB] native experiment OK id={} variationMapping={}", gbExpId, result);
+            return new NativeExperimentResult(gbExpId, result);
+
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to parse GB native experiment response: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Replaces feature rules with ONE experiment-ref rule that links to
+     * a native GB Experiment. GB SDK uses the experiment's split to assign variants.
+     */
+    public Mono<Void> upsertExperimentRefRule(
+            String featureKey,
+            String gbExperimentId,
+            List<ExperimentVariant> variants) {
+
+        log.info("🔗 [GB] upsertExperimentRefRule featureKey={} gbExpId={}", featureKey, gbExperimentId);
+
+        return getFeatureRaw(featureKey)
+                .flatMap(raw -> {
+                    try {
+                        ObjectNode feature = extractFeatureObject(raw);
+                        ObjectNode envs = feature.has("environments") && feature.get("environments").isObject()
+                                ? (ObjectNode) feature.get("environments")
+                                : om.createObjectNode();
+
+                        for (String envName : List.of("production", "dev")) {
+                            ObjectNode envObj = ensureEnvObject(envs, envName);
+                            ensureEnabled(envObj);
+                            var rules = om.createArrayNode();
+                            rules.add(buildExperimentRefRule(gbExperimentId, variants));
+                            envObj.set("rules", rules);
+                        }
+
+                        ObjectNode updateFeature = om.createObjectNode();
+                        updateFeature.put("project", project);
+                        updateFeature.put("owner", owner);
+                        updateFeature.set("environments", envs);
+
+                        return postFeatureUpdate(featureKey, updateFeature, "upsertExperimentRefRule");
+                    } catch (Exception e) {
+                        return Mono.error(new RuntimeException(
+                                "upsertExperimentRefRule failed key=" + featureKey + ": " + e.getMessage(), e));
+                    }
+                });
+    }
+
+    private ObjectNode buildExperimentRefRule(String gbExperimentId, List<ExperimentVariant> variants) {
+        ObjectNode rule = om.createObjectNode();
+        rule.put("type", "experiment-ref");
+        rule.put("experimentId", gbExperimentId);
+        rule.put("condition", "{}");
+
+        var variations = om.createArrayNode();
+        for (ExperimentVariant v : variants) {
+            ObjectNode varItem = om.createObjectNode();
+            String gbVarId = v.getGbVariationId();
+            if (gbVarId == null || gbVarId.isBlank()) {
+                log.warn("⚠️ [GB] variant key={} has no gbVariationId, skipping in ref rule", v.getKey());
+                continue;
+            }
+            varItem.put("variationId", gbVarId);
+            // Inject __variantKey__ so bridge knows the variant name
+            String enrichedRecipe = injectVariantKey(v.getRecipeJson(), v.getKey());
+            putJsonValue(varItem, "value", gbJsonValue(enrichedRecipe));
+            variations.add(varItem);
+        }
+        rule.set("variations", variations);
+        return rule;
+    }
+
+    // -------------------------------------------------------------------------
+    // NATIVE GB EXPERIMENTS — full-featured create / get / list / status update
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a new native GrowthBook Experiment with full targeting support.
+     *
+     * @param trackingKey        unique tracking key
+     * @param name               human-readable name
+     * @param description        optional description
+     * @param hypothesis         optional hypothesis
+     * @param variationsJson     JSON array: [{"key":"control","name":"Control"}, ...]
+     * @param weightsJson        JSON array: [0.5, 0.5]
+     * @param targetingCondition JSON condition: {} = all, {"country":"UA"}, etc.
+     * @param coverage           traffic coverage 0.0..1.0
+     * @param status             draft | running | stopped
+     * @return raw JSON response from GrowthBook API
+     */
+    public Mono<String> createNativeExperimentFull(
+            String trackingKey,
+            String name,
+            String description,
+            String hypothesis,
+            String variationsJson,
+            String weightsJson,
+            String targetingCondition,
+            double coverage,
+            String status) {
+
+        ObjectNode body = buildFullNativeExpBody(
+                trackingKey, name, description, hypothesis,
+                variationsJson, weightsJson, targetingCondition, coverage, status);
+
+        log.info("🧪 [GB] createNativeExperimentFull trackingKey={} status={}", trackingKey, status);
+        try {
+            log.debug("📤 [GB] createNativeExpFull body={}", shortBody(om.writeValueAsString(body)));
+        } catch (Exception ignored) {}
+
+        return admin.post()
+                .uri("/experiments")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB createNativeExpFull error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.info("✅ [GB] createNativeExpFull OK len={}", r.length()));
+    }
+
+    /**
+     * Updates an existing native GrowthBook Experiment.
+     */
+    public Mono<String> updateNativeExperimentFull(
+            String gbExperimentId,
+            String name,
+            String description,
+            String hypothesis,
+            String variationsJson,
+            String weightsJson,
+            String targetingCondition,
+            double coverage,
+            String status) {
+
+        ObjectNode body = buildFullNativeExpBody(
+                null, name, description, hypothesis,
+                variationsJson, weightsJson, targetingCondition, coverage, status);
+
+        log.info("🔄 [GB] updateNativeExperimentFull id={} status={}", gbExperimentId, status);
+
+        return admin.post()
+                .uri("/experiments/{id}", gbExperimentId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB updateNativeExpFull error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.info("✅ [GB] updateNativeExpFull OK id={}", gbExperimentId));
+    }
+
+    /**
+     * Updates only the status of an existing native GrowthBook Experiment.
+     * status: draft | running | stopped | archived
+     */
+    public Mono<String> updateNativeExperimentStatus(String gbExperimentId, String newStatus) {
+        ObjectNode body = om.createObjectNode();
+        body.put("status", newStatus);
+
+        log.info("🔀 [GB] updateNativeExperimentStatus id={} → {}", gbExperimentId, newStatus);
+
+        return admin.post()
+                .uri("/experiments/{id}", gbExperimentId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB updateNativeExpStatus error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.info("✅ [GB] updateNativeExpStatus OK id={}", gbExperimentId));
+    }
+
+    /**
+     * Gets a native GrowthBook Experiment by its GB ID.
+     */
+    public Mono<String> getNativeExperimentRaw(String gbExperimentId) {
+        log.debug("➡️ [GB] GET /experiments/{}", gbExperimentId);
+        return admin.get()
+                .uri("/experiments/{id}", gbExperimentId)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB getNativeExp error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.debug("📥 [GB] getNativeExp OK id={} ({} bytes)", gbExperimentId, r.length()));
+    }
+
+    /**
+     * Lists native GrowthBook Experiments.
+     */
+    public Mono<String> listNativeExperimentsRaw(int limit, int offset) {
+        int safeLimit = Math.min(Math.max(1, limit), 100);
+        int safeOffset = Math.max(0, offset);
+        log.debug("➡️ [GB] GET /experiments limit={} offset={}", safeLimit, safeOffset);
+        return admin.get()
+                .uri(u -> u.path("/experiments").queryParam("limit", safeLimit).queryParam("offset", safeOffset).build())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB listNativeExps error"))
+                .bodyToMono(String.class)
+                .doOnNext(r -> log.debug("📦 [GB] listNativeExps OK ({} bytes)", r.length()));
+    }
+
+    /**
+     * Extracts the GB experiment ID from a createNativeExperimentFull response.
+     */
+    public String extractGbExpId(String raw) {
+        try {
+            JsonNode root = om.readTree(raw);
+            JsonNode expNode = root.has("experiment") ? root.get("experiment") : root;
+            String id = expNode.path("id").asText(null);
+            if (id == null || id.isBlank()) throw new IllegalStateException("no id in response");
+            return id;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to extract GB experiment id: " + e.getMessage(), e);
+        }
+    }
+
+    private ObjectNode buildFullNativeExpBody(
+            String trackingKey,
+            String name,
+            String description,
+            String hypothesis,
+            String variationsJson,
+            String weightsJson,
+            String targetingCondition,
+            double coverage,
+            String status) {
+
+        ObjectNode body = om.createObjectNode();
+        if (trackingKey != null && !trackingKey.isBlank()) body.put("trackingKey", trackingKey);
+        body.put("name", (name != null && !name.isBlank()) ? name : (trackingKey != null ? trackingKey : "Unnamed"));
+        if (description != null && !description.isBlank()) body.put("description", description);
+        if (hypothesis != null && !hypothesis.isBlank()) body.put("hypothesis", hypothesis);
+        body.put("project", project);
+        body.put("hashAttribute", "id");
+        body.put("status", mapStatus(status));
+        body.put("assignmentQueryId", "");
+
+        // Variations
+        var variationsArr = om.createArrayNode();
+        var weightsArr = om.createArrayNode();
+
+        try {
+            JsonNode vars = om.readTree(variationsJson == null || variationsJson.isBlank() ? "[]" : variationsJson);
+            JsonNode wts = om.readTree(weightsJson == null || weightsJson.isBlank() ? "[]" : weightsJson);
+
+            for (int i = 0; i < vars.size(); i++) {
+                JsonNode v = vars.get(i);
+                ObjectNode variation = om.createObjectNode();
+                variation.put("key", v.path("key").asText(String.valueOf(i)));
+                variation.put("name", v.path("name").asText(v.path("key").asText("Variation " + i)));
+                variation.set("screenshots", om.createArrayNode());
+                variationsArr.add(variation);
+
+                double w = (wts.isArray() && i < wts.size()) ? wts.get(i).asDouble(0.5) : (1.0 / Math.max(1, vars.size()));
+                weightsArr.add(w);
+            }
+        } catch (Exception e) {
+            log.warn("[GB] Failed to parse variationsJson/weightsJson: {}", e.getMessage());
+            // Fallback: two equal variants
+            for (String vKey : new String[]{"control", "treatment"}) {
+                ObjectNode v = om.createObjectNode();
+                v.put("key", vKey); v.put("name", vKey); v.set("screenshots", om.createArrayNode());
+                variationsArr.add(v);
+                weightsArr.add(0.5);
+            }
+        }
+        body.set("variations", variationsArr);
+
+        // Phase with targeting
+        String cond = (targetingCondition == null || targetingCondition.isBlank()) ? "{}" : targetingCondition;
+        double cov = Math.max(0.0, Math.min(1.0, coverage));
+
+        ObjectNode phase = om.createObjectNode();
+        phase.put("name", "Main");
+        phase.put("dateStarted", java.time.Instant.now().toString());
+        phase.put("coverage", cov);
+        phase.set("variationWeights", weightsArr.deepCopy());
+        phase.put("condition", cond);
+
+        ObjectNode ns = om.createObjectNode();
+        ns.put("enabled", false);
+        ns.put("namespaceId", "");
+        ns.put("name", "");
+        ns.set("range", om.createArrayNode().add(0).add(1));
+        phase.set("namespace", ns);
+
+        body.set("phases", om.createArrayNode().add(phase));
+        return body;
     }
 
     // -------------------------------------------------------------------------

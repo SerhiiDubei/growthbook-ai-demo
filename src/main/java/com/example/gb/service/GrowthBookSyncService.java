@@ -4,6 +4,7 @@ import com.example.gb.model.Experiment;
 import com.example.gb.model.ExperimentVariant;
 
 import java.util.List;
+import java.util.Map;
 
 public interface GrowthBookSyncService {
 
@@ -11,16 +12,49 @@ public interface GrowthBookSyncService {
     void upsertRecipe(Experiment exp);
 
     /**
-     * Ensure feature exists + upsert recipe considering A/B variants.
-     * When variants are present, syncs the control variant's recipe as defaultValue.
-     * Each variant is also pushed as a force rule keyed by __variant__ attribute
-     * so future GB-SDK-based delivery is possible without bridge changes.
+     * Ensure feature + upsert A/B variants.
+     * Creates (or updates) a native GB Experiment, stores the experiment-ref rule
+     * on the feature, and returns sync result with GB IDs.
+     *
+     * @return {@link SyncResult} containing gbExperimentId and per-variant gbVariationId mapping.
+     *         Returns empty result if no variants were provided.
      */
-    void upsertRecipeWithVariants(Experiment exp, List<ExperimentVariant> variants);
+    SyncResult upsertRecipeWithVariants(Experiment exp, List<ExperimentVariant> variants);
 
     /** Enable feature in GrowthBook for this experiment */
     void enable(Experiment exp);
 
     /** Disable feature in GrowthBook for this experiment */
     void disable(Experiment exp);
+
+    /**
+     * Syncs the native GrowthBook Experiment status to match our local status.
+     * Called after every lifecycle transition (start/pause/finish/fail/reset).
+     * No-op if experiment has no gbExperimentId yet.
+     * Best-effort: logs but does not throw on failure.
+     */
+    void syncStatus(Experiment exp);
+
+    /**
+     * Fetches the current status of the native GrowthBook Experiment from the API.
+     * Returns null if the experiment has no gbExperimentId or the API call fails.
+     */
+    String fetchGbStatus(Experiment exp);
+
+    /**
+     * Result of syncing an experiment with variants to GrowthBook.
+     * Contains native GB Experiment ID and per-variant GB Variation ID mapping.
+     */
+    record SyncResult(
+            String gbExperimentId,
+            Map<String, String> variantKeyToGbVariationId  // "control" → "var_abc123"
+    ) {
+        public static SyncResult empty() {
+            return new SyncResult(null, Map.of());
+        }
+
+        public boolean hasGbExperiment() {
+            return gbExperimentId != null && !gbExperimentId.isBlank();
+        }
+    }
 }

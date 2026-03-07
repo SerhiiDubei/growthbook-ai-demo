@@ -10,6 +10,7 @@ import com.example.gb.model.dto.ExperimentStatsResponse;
 import com.example.gb.model.dto.UpdateExperimentRequest;
 import com.example.gb.model.enums.AutonomyLevel;
 import com.example.gb.service.ExperimentService;
+import com.example.gb.service.GrowthBookSyncService;
 import com.example.gb.service.StatisticsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
@@ -32,6 +33,7 @@ public class ExperimentTools {
     private static final String ACTOR = "agent"; // ✅ зафіксовано
 
     private final ExperimentService experimentService;
+    private final GrowthBookSyncService gbSync;
     private final StatisticsService statisticsService;
     private final ObjectMapper objectMapper;
 
@@ -272,21 +274,39 @@ public class ExperimentTools {
     // READ
     // ------------------------------------------------------------
 
-    @Tool("Get experiment by id. Returns JSON: {ok,id,status,pageKey,key,featureKey,recipeJson,lastError,...}")
+    @Tool("""
+          Get experiment by id.
+          Always fetches the real-time status from GrowthBook API (source of truth).
+          Returns JSON: {ok, id, localStatus, gbStatus, gbExperimentId, pageKey, key, featureKey, ...}
+          - localStatus: status stored in our DB
+          - gbStatus: REAL status from GrowthBook (draft|running|stopped) — use this as authoritative
+          """)
     public String getExperiment(@P("Experiment id") long id) {
         try {
             log.info("[EXP TOOL] getExperiment id={}", id);
             Experiment e = experimentService.get(id);
-            return ok(e, Map.of("op", "get"));
+
+            // Fetch real-time status from GrowthBook API
+            String gbStatus = gbSync.fetchGbStatus(e);
+
+            Map<String, Object> extra = new LinkedHashMap<>();
+            extra.put("op", "get");
+            extra.put("gbStatus", gbStatus != null ? gbStatus : "unknown (no gbExperimentId yet)");
+            extra.put("gbExperimentId", e.getGbExperimentId());
+
+            return ok(e, extra);
         } catch (Exception e) {
             log.error("[EXP TOOL] getExperiment FAILED id={}", id, e);
             return error("getExperiment", e);
         }
     }
 
-    // ⚠️ listByPageKey з Pageable через tool незручно (бо Pageable не primitive).
-    // Тому даю спрощений list: page,size як int.
-    @Tool("List experiments by pageKey with paging. Returns JSON with ids and brief fields.")
+    @Tool("""
+          List experiments by pageKey with paging.
+          Returns JSON with ids, localStatus (from DB) and gbStatus (from GrowthBook API).
+          gbStatus is the SOURCE OF TRUTH — always prefer it over localStatus.
+          gbStatus values: draft | running | stopped | unknown
+          """)
     public String listExperiments(
             @P("Page key") String pageKey,
             @P("Page number (0-based)") int page,
@@ -295,7 +315,6 @@ public class ExperimentTools {
         try {
             log.info("[EXP TOOL] listExperiments pageKey={} page={} size={}", pageKey, page, size);
 
-            // Робимо Pageable тут, бо tool params only primitive — ок
             var pageable = org.springframework.data.domain.PageRequest.of(
                     Math.max(0, page),
                     Math.min(100, Math.max(1, size))
@@ -311,8 +330,16 @@ public class ExperimentTools {
             out.put("totalElements", p.getTotalElements());
             out.put("totalPages", p.getTotalPages());
 
-            var items = p.getContent().stream().map(this::brief).toList();
+            // Enrich each item with real-time GB status
+            var items = p.getContent().stream().map(exp -> {
+                Map<String, Object> m = brief(exp);
+                String gbStatus = gbSync.fetchGbStatus(exp);
+                m.put("gbStatus", gbStatus != null ? gbStatus : "unknown");
+                m.put("gbExperimentId", exp.getGbExperimentId());
+                return m;
+            }).toList();
             out.put("items", items);
+            out.put("note", "gbStatus is fetched from GrowthBook API — use it as authoritative status");
 
             return toJson(out);
 
@@ -465,12 +492,12 @@ public class ExperimentTools {
     private Map<String, Object> brief(Experiment e) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", e.getId());
-        m.put("status", e.getStatus() == null ? null : e.getStatus().name());
+        m.put("localStatus", e.getStatus() == null ? null : e.getStatus().name());
         m.put("pageKey", e.getPageKey());
         m.put("key", e.getKey());
         m.put("featureKey", e.getFeatureKey());
         m.put("title", e.getTitle());
-        m.put("updatedAt", e.getUpdatedAt()); // якщо є в AbstractVersional
+        m.put("updatedAt", e.getUpdatedAt());
         return m;
     }
 
@@ -478,7 +505,7 @@ public class ExperimentTools {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("id", e.getId());
-        out.put("status", e.getStatus() == null ? null : e.getStatus().name());
+        out.put("localStatus", e.getStatus() == null ? null : e.getStatus().name());
         out.put("pageKey", e.getPageKey());
         out.put("key", e.getKey());
         out.put("featureKey", e.getFeatureKey());
