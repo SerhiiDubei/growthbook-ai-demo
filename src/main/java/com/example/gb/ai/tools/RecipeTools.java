@@ -242,6 +242,298 @@ public class RecipeTools {
     }
 
     // -------------------------------------------------------------------------
+    // MULTIPLE STYLES — change several CSS properties at once (setStyle)
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+          Add a treatment variant that changes MULTIPLE CSS properties of ONE element at once.
+          Use this when you need to change more than one style property on the same element
+          (e.g. background-color + color + border-radius together).
+          styleJson: JSON object where keys are camelCase CSS property names and values are CSS values.
+            e.g. {"backgroundColor":"#ff0000","color":"#fff","borderRadius":"8px"}
+            Allowed properties: backgroundColor, color, fontSize, fontWeight, borderRadius,
+              padding, margin, opacity, display, textAlign, letterSpacing, boxShadow,
+              border, borderColor, maxWidth, width, height.
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addMultiStyleVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'Bold red CTA'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the element to style (from inventory)") String selector,
+            @P("JSON object of camelCase CSS properties, e.g. {\"backgroundColor\":\"#f00\",\"color\":\"#fff\"}") String styleJson
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addMultiStyleVariant experimentId={} selector={}", experimentId, selector);
+
+            if (selector == null || selector.isBlank()) throw new IllegalArgumentException("selector is blank");
+            if (styleJson == null || styleJson.isBlank()) throw new IllegalArgumentException("styleJson is blank");
+
+            Object styleObj = om.readValue(styleJson, Object.class);
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "setStyle",
+                            "selector", selector,
+                            "value", styleObj
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addMultiStyleVariant FAILED experimentId={}", experimentId, e);
+            return error("addMultiStyleVariant", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // HTML CONTENT — replace inner HTML of an element
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+          Add a treatment variant that replaces the inner HTML of a DOM element.
+          Use this when you need to change complex HTML content (not just plain text).
+          The HTML is sanitized server-side before being applied.
+          selector: CSS selector from DOM inventory.
+          htmlContent: the new inner HTML string, e.g. "<strong>Buy now</strong> →"
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addHtmlVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'Bold CTA label'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("New inner HTML content") String htmlContent
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addHtmlVariant experimentId={} selector={}", experimentId, selector);
+
+            if (selector == null || selector.isBlank()) throw new IllegalArgumentException("selector is blank");
+            if (htmlContent == null) throw new IllegalArgumentException("htmlContent is null");
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "html:safe",
+                            "selector", selector,
+                            "value", htmlContent
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addHtmlVariant FAILED experimentId={}", experimentId, e);
+            return error("addHtmlVariant", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // ATTRIBUTE — change an HTML attribute of an element
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+          Add a treatment variant that changes an HTML ATTRIBUTE of a DOM element.
+          Use this when you want to change href, src, alt, title, aria-label, target, etc.
+          selector: CSS selector from DOM inventory.
+          attributeName: one of: href, src, alt, title, aria-label, role, target,
+                         data-variant, data-test, rel
+          attributeValue: the new value for the attribute.
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addAttrVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'New link target'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("Attribute name: href | src | alt | title | aria-label | role | target | data-variant | data-test | rel") String attributeName,
+            @P("New attribute value") String attributeValue
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addAttrVariant experimentId={} selector={} attr={}", experimentId, selector, attributeName);
+
+            if (selector == null || selector.isBlank())       throw new IllegalArgumentException("selector is blank");
+            if (attributeName == null || attributeName.isBlank()) throw new IllegalArgumentException("attributeName is blank");
+            if (attributeValue == null)                        throw new IllegalArgumentException("attributeValue is null");
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "attr",
+                            "selector", selector,
+                            "name", attributeName,
+                            "value", attributeValue
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addAttrVariant FAILED experimentId={}", experimentId, e);
+            return error("addAttrVariant", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // IMAGE — change image src
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+          Add a treatment variant that changes the SRC of an <img> element.
+          Use this when you want to A/B test different images.
+          selector: CSS selector of the <img> element from DOM inventory.
+          imageSrc: new image URL (absolute or relative).
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addImageVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'Product photo B'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the <img> element (from inventory)") String selector,
+            @P("New image URL, e.g. '/images/hero-b.jpg'") String imageSrc
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addImageVariant experimentId={} selector={}", experimentId, selector);
+
+            if (selector == null || selector.isBlank()) throw new IllegalArgumentException("selector is blank");
+            if (imageSrc == null || imageSrc.isBlank()) throw new IllegalArgumentException("imageSrc is blank");
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "image",
+                            "selector", selector,
+                            "src", imageSrc
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addImageVariant FAILED experimentId={}", experimentId, e);
+            return error("addImageVariant", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // CSS CLASS — add or remove a CSS class
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+          Add a treatment variant that ADDS a CSS class to a DOM element.
+          Use this when you want to activate a pre-defined CSS style via class toggle
+          (e.g. add class "highlight", "featured", "large").
+          selector: CSS selector from DOM inventory.
+          className: the CSS class name to add (without the dot prefix).
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addClassAddVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'Highlighted CTA'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("CSS class name to ADD (without dot), e.g. 'featured'") String className
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addClassAddVariant experimentId={} selector={} class={}", experimentId, selector, className);
+
+            if (selector == null || selector.isBlank())   throw new IllegalArgumentException("selector is blank");
+            if (className == null || className.isBlank()) throw new IllegalArgumentException("className is blank");
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "class:add",
+                            "selector", selector,
+                            "value", className
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addClassAddVariant FAILED experimentId={}", experimentId, e);
+            return error("addClassAddVariant", e);
+        }
+    }
+
+    @Tool("""
+          Add a treatment variant that REMOVES a CSS class from a DOM element.
+          Use this when you want to deactivate a style by removing a class.
+          selector: CSS selector from DOM inventory.
+          className: the CSS class name to remove (without the dot prefix).
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addClassRemoveVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'No highlight'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("CSS class name to REMOVE (without dot), e.g. 'featured'") String className
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addClassRemoveVariant experimentId={} selector={} class={}", experimentId, selector, className);
+
+            if (selector == null || selector.isBlank())   throw new IllegalArgumentException("selector is blank");
+            if (className == null || className.isBlank()) throw new IllegalArgumentException("className is blank");
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "class:remove",
+                            "selector", selector,
+                            "value", className
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addClassRemoveVariant FAILED experimentId={}", experimentId, e);
+            return error("addClassRemoveVariant", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // HIDE — hide or remove an element
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+          Add a treatment variant that HIDES an element from the page.
+          Use this when you want to test removing a section, banner, or element entirely.
+          selector: CSS selector from DOM inventory.
+          weight: traffic share 0.0..1.0. All variants must sum to 1.0.
+          Returns JSON: {ok, variantId, experimentId, key, name, weight}
+          """)
+    public String addHideVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human-readable name, e.g. 'No promo banner'") String variantName,
+            @P("Traffic weight, e.g. 0.5 for 50%") double weight,
+            @P("CSS selector of the element to hide (from inventory)") String selector
+    ) {
+        try {
+            log.info("[RECIPE TOOL] addHideVariant experimentId={} selector={}", experimentId, selector);
+
+            if (selector == null || selector.isBlank()) throw new IllegalArgumentException("selector is blank");
+
+            String recipe = om.writeValueAsString(Map.of(
+                    "ops", List.of(Map.of(
+                            "action", "remove",
+                            "selector", selector
+                    ))
+            ));
+
+            return saveVariant(experimentId, variantKey, variantName, weight, recipe, 1);
+        } catch (Exception e) {
+            log.error("[RECIPE TOOL] addHideVariant FAILED experimentId={}", experimentId, e);
+            return error("addHideVariant", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
 

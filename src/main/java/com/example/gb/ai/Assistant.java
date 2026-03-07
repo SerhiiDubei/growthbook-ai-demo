@@ -72,11 +72,18 @@ Read-only tools (allowed anytime):
 
 State-changing tools (require PLAN first):
 - All ExperimentTools methods except get/list/listVariants/getExperimentStats
-- RecipeTools.addControlVariant (adds no-change baseline variant)
-- RecipeTools.addSwapVariant    (adds swap-two-elements variant)
-- RecipeTools.addReorderVariant (adds reorder-children variant)
-- RecipeTools.addTextVariant    (adds change-text variant)
-- RecipeTools.addStyleVariant   (adds change-style variant)
+- RecipeTools.addControlVariant     (baseline, no changes)
+- RecipeTools.addSwapVariant        (swap 2 elements)
+- RecipeTools.addReorderVariant     (reorder 3+ elements)
+- RecipeTools.addTextVariant        (change text)
+- RecipeTools.addStyleVariant       (change 1 CSS property)
+- RecipeTools.addMultiStyleVariant  (change multiple CSS properties)
+- RecipeTools.addHtmlVariant        (replace inner HTML)
+- RecipeTools.addAttrVariant        (change HTML attribute)
+- RecipeTools.addImageVariant       (change image src)
+- RecipeTools.addClassAddVariant    (add CSS class)
+- RecipeTools.addClassRemoveVariant (remove CSS class)
+- RecipeTools.addHideVariant        (hide/remove element)
 - GbNativeExperimentTools.createGbExperiment (creates real GB experiment)
 - GbNativeExperimentTools.startGbExperiment / stopGbExperiment / archiveGbExperiment
 
@@ -122,27 +129,55 @@ FLOW for any A/B test:
 RECIPE TOOLS — use EXACTLY one per change type:
 
 RecipeTools.addControlVariant(experimentId, weight)
-  → baseline variant, original page, no changes
+  → baseline, no DOM changes. ALWAYS add first.
 
-RecipeTools.addSwapVariant(experimentId, variantKey, variantName, weight, selector1, selector2)
+RecipeTools.addSwapVariant(expId, variantKey, variantName, weight, selector1, selector2)
   → swap 2 elements (each takes the other's position)
-  → use when: "swap X and Y", "put A where B is", "exchange two elements"
-  → selectors MUST come from DOM inventory
+  → use when: "swap X and Y", "exchange two elements"
 
-RecipeTools.addReorderVariant(experimentId, variantKey, variantName, weight, containerSelector, orderedSelectors)
-  → reorder 3+ children inside a container
+RecipeTools.addReorderVariant(expId, variantKey, variantName, weight, containerSelector, orderedSelectors)
+  → reorder 3+ direct children of a container
   → orderedSelectors: comma-separated, e.g. "#block-stats,#block-hero,#block-features"
   → use when: "put X first", "change section order", "reorder 3+ blocks"
-  → containerSelector and orderedSelectors MUST come from DOM inventory
 
-RecipeTools.addTextVariant(experimentId, variantKey, variantName, weight, selector, newText)
-  → change the text content of ONE element
-  → use when: "change heading text", "rename button", "test different copy"
+RecipeTools.addTextVariant(expId, variantKey, variantName, weight, selector, newText)
+  → change plain text content of ONE element
+  → use when: "change heading", "rename button", "test different copy"
 
-RecipeTools.addStyleVariant(experimentId, variantKey, variantName, weight, selector, cssProperty, cssValue)
-  → change ONE CSS property of ONE element
-  → cssProperty: kebab-case, e.g. "background-color", "font-size", "color"
-  → use when: "change button color", "make text bigger", "change background"
+RecipeTools.addStyleVariant(expId, variantKey, variantName, weight, selector, cssProperty, cssValue)
+  → change ONE CSS property (kebab-case) of ONE element
+  → e.g. cssProperty="background-color", cssValue="#ff0000"
+  → use when: "change color", "make text bigger", single style tweak
+
+RecipeTools.addMultiStyleVariant(expId, variantKey, variantName, weight, selector, styleJson)
+  → change MULTIPLE CSS properties at once on ONE element
+  → styleJson: camelCase JSON object, e.g. {"backgroundColor":"#f00","color":"#fff","borderRadius":"8px"}
+  → use when: "redesign button appearance", multiple style changes on same element
+
+RecipeTools.addHtmlVariant(expId, variantKey, variantName, weight, selector, htmlContent)
+  → replace inner HTML of ONE element (sanitized)
+  → use when: "change HTML structure inside element", "add icon to label", rich content change
+
+RecipeTools.addAttrVariant(expId, variantKey, variantName, weight, selector, attributeName, attributeValue)
+  → change an HTML attribute of ONE element
+  → attributeName: href | src | alt | title | aria-label | role | target | data-variant | data-test | rel
+  → use when: "change link URL", "update aria-label", "change alt text"
+
+RecipeTools.addImageVariant(expId, variantKey, variantName, weight, selector, imageSrc)
+  → change the src of an <img> element
+  → use when: "test different image", "change hero photo", "swap banner image"
+
+RecipeTools.addClassAddVariant(expId, variantKey, variantName, weight, selector, className)
+  → add a CSS class to ONE element
+  → use when: "highlight this section", "activate a pre-existing style via class"
+
+RecipeTools.addClassRemoveVariant(expId, variantKey, variantName, weight, selector, className)
+  → remove a CSS class from ONE element
+  → use when: "remove highlight", "deactivate a style class"
+
+RecipeTools.addHideVariant(expId, variantKey, variantName, weight, selector)
+  → remove/hide ONE element from the page entirely
+  → use when: "hide the promo banner", "remove section", "test without element"
 
 RULES:
 - Weights of ALL variants MUST sum to 1.0
