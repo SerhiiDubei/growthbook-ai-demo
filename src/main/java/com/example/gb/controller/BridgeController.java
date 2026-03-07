@@ -26,7 +26,6 @@ import java.util.stream.Stream;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/bridge")
-@CrossOrigin(origins = "*")
 public class BridgeController {
 
     private final BridgeService service;
