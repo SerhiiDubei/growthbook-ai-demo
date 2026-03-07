@@ -466,6 +466,71 @@
           case "remove":
             each((el) => el.remove());
             break;
+
+          case "swap": {
+            // Swap two elements in the DOM, preserving their exact positions.
+            // op: { action:"swap", selector1:"#a", selector2:"#b" }
+            const el1 = op.selector1 ? document.querySelector(op.selector1) : null;
+            const el2 = op.selector2 ? document.querySelector(op.selector2) : null;
+            if (!el1 || !el2) {
+              console.warn("[GB-bridge] swap: element(s) not found", op.selector1, op.selector2);
+              break;
+            }
+            if (el1 === el2) break;
+
+            // Insert a temporary placeholder so we don't lose el1's position
+            const placeholder = document.createComment("gb-swap");
+            el1.parentNode.insertBefore(placeholder, el1);
+
+            el2.parentNode.insertBefore(el1, el2);
+            placeholder.parentNode.insertBefore(el2, placeholder);
+            placeholder.parentNode.removeChild(placeholder);
+
+            console.info("[GB-bridge] swap applied:", op.selector1, "↔", op.selector2);
+            break;
+          }
+
+          case "reorder": {
+            // Reorder direct children of a container element.
+            // op: { action:"reorder", container:"#wrapper", order:["#id1","#id2",...] }
+            // Elements in `order` are moved to the front in that order;
+            // any children not listed remain at the end in their original relative order.
+            const containerEl = op.container
+                ? document.querySelector(op.container)
+                : null;
+            if (!containerEl) {
+              console.warn("[GB-bridge] reorder: container not found", op.container);
+              break;
+            }
+            if (!Array.isArray(op.order) || !op.order.length) {
+              console.warn("[GB-bridge] reorder: `order` must be a non-empty array");
+              break;
+            }
+
+            // Resolve selectors → elements (only direct children count)
+            const children = Array.from(containerEl.children);
+            const resolved = op.order.map(sel => {
+              const el = document.querySelector(sel);
+              return (el && el.parentElement === containerEl) ? el : null;
+            });
+
+            const valid = resolved.filter(Boolean);
+            if (!valid.length) {
+              console.warn("[GB-bridge] reorder: no matching children found for order", op.order);
+              break;
+            }
+
+            // Move each resolved element to the end of the container in order
+            valid.forEach(el => containerEl.appendChild(el));
+
+            // Elements that were not in `order` stay after the ordered ones
+            children
+              .filter(ch => !valid.includes(ch))
+              .forEach(ch => containerEl.appendChild(ch));
+
+            console.info("[GB-bridge] reorder applied in", op.container, "→", op.order);
+            break;
+          }
         }
       } catch (e) {
         console.warn("[GB-bridge] op failed", rawOp, e);

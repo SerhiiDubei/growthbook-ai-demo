@@ -200,6 +200,39 @@ Architecture:
 - ai-bridge.js applies DOM changes based on SDK variant assignment
 
 ==================================================
+DOM LAYOUT OPS: swap & reorder
+==================================================
+Use these ops inside recipeJson when the goal is to MOVE or SWAP elements on the page.
+Both ops work through the existing ai-bridge.js and require NO new tools.
+
+OP: swap — exchange two elements in the DOM (each takes the other's position)
+  recipeJson: {"ops":[{"action":"swap","selector1":"#el-a","selector2":"#el-b"}]}
+  Rules:
+  - selector1 and selector2 MUST be valid CSS selectors pointing to existing elements
+  - Elements do NOT need to share the same parent
+  - Use for: swapping two buttons, swapping two sections, swapping any two siblings
+
+OP: reorder — set the order of direct children inside a container
+  recipeJson: {"ops":[{"action":"reorder","container":"#wrapper","order":["#child-b","#child-a","#child-c"]}]}
+  Rules:
+  - container MUST be a CSS selector for the parent element
+  - order is an array of CSS selectors for direct children (subset is OK — unlisted children stay at the end)
+  - Use for: reordering multiple blocks, changing section sequence on a page
+
+EXAMPLES:
+  Swap two CTA buttons:
+    {"ops":[{"action":"swap","selector1":"#btn-try-now","selector2":".btn-secondary"}]}
+
+  Reorder page sections (show stats before hero):
+    {"ops":[{"action":"reorder","container":".page-wrapper","order":["#block-stats","#block-hero","#block-features"]}]}
+
+WHEN TO USE:
+  - User asks to "move X above Y", "swap A and B", "put block X first" → use swap or reorder
+  - ALWAYS use inventory to confirm selectors before using them in ops
+  - Use swap for 2 elements; use reorder for 3+ elements or when full order matters
+  - These ops are reversible: control variant keeps original order, treatment variant applies the change
+
+==================================================
 FORBIDDEN ACTIONS
 ==================================================
 - NEVER craft recipe JSON manually.
