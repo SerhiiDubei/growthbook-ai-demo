@@ -115,7 +115,10 @@ public class DomInventoryTools {
           """)
     public String getInventoryItemsByUrlJson(@P("Page URL") String pageUrl) {
         try {
-            var e = latestRepo.findFirstByPageUrlOrderByUpdatedAtDesc(pageUrl)
+            String normalizedUrl = DomPageKeyUtil.normalizeUrl(pageUrl);
+            // Try by normalized URL first, fallback to pageKey lookup
+            var e = latestRepo.findFirstByPageUrlOrderByUpdatedAtDesc(normalizedUrl)
+                    .or(() -> latestRepo.findByPageKey(DomPageKeyUtil.pageKeyFromUrl(normalizedUrl)))
                     .orElseThrow(() -> new IllegalArgumentException("No inventory for pageUrl=" + pageUrl));
 
             List<Map<String, Object>> items = parseItems(e.getItemsJson()).stream()

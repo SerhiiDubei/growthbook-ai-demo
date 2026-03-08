@@ -17,6 +17,21 @@ public final class DomPageKeyUtil {
         }
     }
 
+    /**
+     * Strips query string and fragment from URL, leaving only scheme + host + port + path.
+     * e.g. https://site.com/page?foo=bar#hash → https://site.com/page
+     */
+    public static String normalizeUrl(String url) {
+        if (url == null || url.isBlank()) return url;
+        try {
+            URI u = URI.create(url);
+            String path = (u.getPath() == null || u.getPath().isBlank()) ? "/" : u.getPath();
+            return new URI(u.getScheme(), null, u.getHost(), u.getPort(), path, null, null).toString();
+        } catch (Exception e) {
+            return url;
+        }
+    }
+
     public static String pageKeyFromUrl(String url) {
         try {
             URI u = URI.create(url);
