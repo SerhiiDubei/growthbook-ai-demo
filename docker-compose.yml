@@ -1,9 +1,50 @@
 services:
+
+  # ── Nginx reverse proxy + SSL termination ─────────────────
+  # Єдина точка входу ззовні. Слухає 80 і 443.
+  # Проксює: /api/v1/* → growthbook:3100, /* → app:8080
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Nginx конфіги (default.conf або ssl.conf перейменований)
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # SSL сертифікати від Let's Encrypt (спільний volume з certbot)
+      - ./nginx/certbot/conf:/etc/letsencrypt:ro
+      # Тека для Let's Encrypt HTTP challenge токенів
+      - ./nginx/certbot/www:/var/www/certbot:ro
+    depends_on:
+      - app
+      - growthbook
+    networks: [appnet]
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Certbot — автоматичне оновлення SSL сертифікатів ──────
+  # Раз на 12 годин перевіряє чи потрібно оновити сертифікат
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./nginx/certbot/conf:/etc/letsencrypt
+      - ./nginx/certbot/www:/var/www/certbot
+    # Нескінченний цикл: спробуй renewal → чекай 12h → повтори
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done;'"
+    restart: unless-stopped
+
   app:
     build: .
     container_name: growthbook-ai-demo
-    ports:
-      - "8080:8080"
+    # 8080 НЕ відкритий назовні — доступ тільки через Nginx
+    expose:
+      - "8080"
     env_file: .env
     depends_on:
       - growthbook
@@ -28,9 +69,12 @@ services:
       - ENABLE_ADMIN_API=true
       - ADMIN_API_KEYS=${GB_ADMIN_TOKEN}
       - APP_ORIGIN=${GB_APP_ORIGIN:-http://localhost:3000}
+    # 3000 — GrowthBook UI (доступ через SSH tunnel: ssh -L 3000:localhost:3000 ...)
+    # 3100 — НЕ відкритий назовні, SDK API проходить через Nginx /api/v1/
     ports:
-      - "3000:3000"  # UI
-      - "3100:3100"  # Admin/API
+      - "3000:3000"
+    expose:
+      - "3100"
     depends_on:
       - mongo
     networks: [appnet]
