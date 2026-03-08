@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -495,13 +496,38 @@ public class ExperimentService {
 
     // ---------- helpers ----------
 
+    /**
+     * Action names that are RecipeTools method names — they must NEVER appear
+     * as op.action values in recipeJson. If they do, it means the agent incorrectly
+     * wrote meta-ops into the recipe instead of calling the proper RecipeTools methods.
+     */
+    private static final Set<String> FORBIDDEN_META_OPS = Set.of(
+            "addControlVariant", "addSwapVariant", "addReorderVariant",
+            "addTextVariant", "addStyleVariant", "addMultiStyleVariant",
+            "addHtmlVariant", "addAttrVariant", "addImageVariant",
+            "addClassAddVariant", "addClassRemoveVariant", "addHideVariant"
+    );
+
     private void validateRecipeJson(String json) {
         if (json == null || json.isBlank()) throw new IllegalArgumentException("recipeJson is blank");
         try {
             var node = objectMapper.readTree(json);
             if (!node.isObject()) throw new IllegalArgumentException("recipeJson must be JSON object");
-            // опціонально:
-            // if (!node.has("ops")) throw new IllegalArgumentException("recipeJson must contain 'ops'");
+
+            var ops = node.get("ops");
+            if (ops != null && ops.isArray()) {
+                for (var op : ops) {
+                    String action = op.has("action") ? op.get("action").asText("") : "";
+                    if (FORBIDDEN_META_OPS.contains(action)) {
+                        throw new IllegalArgumentException(
+                                "recipeJson contains forbidden meta-op action='" + action +
+                                "'. Use RecipeTools (addControlVariant, addSwapVariant, …) " +
+                                "instead of writing recipeJson manually.");
+                    }
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException("recipeJson invalid JSON: " + e.getMessage());
         }
