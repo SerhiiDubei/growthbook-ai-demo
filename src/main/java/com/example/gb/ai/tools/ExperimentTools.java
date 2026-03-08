@@ -141,10 +141,11 @@ public class ExperimentTools {
         }
     }
 
-    @Tool("""
-          Update ONLY recipeJson (safe helper). Agent is NOT allowed to change featureKey.
-          Returns JSON: {ok,id,status,...}
-          """)
+    /**
+     * Internal-only helper: update raw recipeJson.
+     * The @Tool annotation is intentionally removed — agents MUST use RecipeTools
+     * (addControlVariant, addSwapVariant, etc.) instead of writing recipeJson manually.
+     */
     public String updateRecipe(
             @P("Experiment id") long id,
             @P("Recipe JSON object string, e.g. {\"ops\":[...]}") String recipeJson
