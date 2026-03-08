@@ -189,11 +189,28 @@
     return parts.join(" > ");
   }
 
+  // Returns true if element lives inside a navigation/chrome area (not main content)
+  function isNavOrChrome(el) {
+    let cur = el;
+    while (cur && cur !== document.body) {
+      const tag = cur.tagName && cur.tagName.toLowerCase();
+      if (tag === "nav" || tag === "header" || tag === "footer") return true;
+      const role = cur.getAttribute && cur.getAttribute("role");
+      if (role === "navigation" || role === "banner" || role === "contentinfo") return true;
+      const id = (cur.id || "").toLowerCase();
+      const cls = (cur.className && typeof cur.className === "string" ? cur.className : "").toLowerCase();
+      if (/\b(nav|navbar|header|footer|menu|sidebar|breadcrumb|cookie|consent)\b/.test(id + " " + cls)) return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  }
+
   function collectInventory() {
     const items = [];
 
-    // Headings
+    // Headings (include even inside nav, but exclude pure navigation headings)
     document.querySelectorAll("h1, h2, h3, [role='heading']").forEach(el => {
+      if (isNavOrChrome(el)) return;
       const selector = uniqueSelector(el);
       if (!selector) return;
 
@@ -205,20 +222,40 @@
       });
     });
 
-    // CTA / buttons / links
+    // CTA / buttons / links — skip navigation/chrome, skip empty/icon-only links
     document
-    .querySelectorAll("button, [role='button'], a, a.btn, a.button, a[class*='btn'], .btn, .btn-cta")
+    .querySelectorAll("button, [role='button'], a.btn, a.button, a[class*='btn'], .btn, .btn-cta")
     .forEach(el => {
+      if (isNavOrChrome(el)) return;
       const selector = uniqueSelector(el);
       if (!selector) return;
 
       const label = (el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 140);
+      if (!label) return; // skip icon-only / decorative elements
+
       const href = (el.tagName === "A" ? (el.getAttribute("href") || "") : "");
 
       items.push({
         kind: "cta",
         text: label,
         href,
+        selector
+      });
+    });
+
+    // Plain <a> tags in main content only (not nav/chrome)
+    document.querySelectorAll("main a, article a, section a, [role='main'] a").forEach(el => {
+      if (isNavOrChrome(el)) return;
+      const selector = uniqueSelector(el);
+      if (!selector) return;
+
+      const label = (el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 140);
+      if (!label) return;
+
+      items.push({
+        kind: "cta",
+        text: label,
+        href: el.getAttribute("href") || "",
         selector
       });
     });
