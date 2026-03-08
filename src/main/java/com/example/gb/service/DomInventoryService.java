@@ -24,7 +24,10 @@ public class DomInventoryService {
     private final ObjectMapper objectMapper;
     private final DomRegistryService domRegistry; // ✅ add
 
-    public SaveResult saveFromPageUrl(String pageUrl, List<Item> items) {
+    public SaveResult saveFromPageUrl(String rawPageUrl, List<Item> items) {
+
+        // Strip query params and fragment so stored URL is always canonical
+        String pageUrl = DomPageKeyUtil.normalizeUrl(rawPageUrl);
 
         String origin = DomPageKeyUtil.originFromUrl(pageUrl);
         String pageKey = DomPageKeyUtil.pageKeyFromUrl(pageUrl);
