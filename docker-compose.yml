@@ -70,12 +70,11 @@ services:
       - ADMIN_API_KEYS=${GB_ADMIN_TOKEN}
       - APP_ORIGIN=${GB_APP_ORIGIN:-http://localhost:3000}
       - API_HOST=${GB_API_HOST:-http://localhost:3100}
-    # 3000 — GrowthBook UI (доступ через SSH tunnel: ssh -L 3000:localhost:3000 ...)
-    # 3100 — НЕ відкритий назовні, SDK API проходить через Nginx /api/v1/
+    # 3000 — GrowthBook UI (доступ через SSH tunnel: ssh -L 3000:localhost:3000 -L 3100:localhost:3100 ...)
+    # 3100 — API сервер, потрібен для SSH тунелю щоб браузер міг звертатись до localhost:3100
     ports:
       - "3000:3000"
-    expose:
-      - "3100"
+      - "3100:3100"
     depends_on:
       - mongo
     networks: [appnet]
