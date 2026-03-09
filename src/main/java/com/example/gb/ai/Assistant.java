@@ -122,6 +122,7 @@ FLOW for any A/B test:
 2) addControlVariant(experimentId, weight=0.5) — always first, no DOM changes
 3) ONE of the change variants below (weight=0.5)
 4) startExperiment → ACTIVE, GrowthBook SDK assigns users automatically
+   SERVER ENFORCED: startExperiment WILL FAIL if variants < 2 or control variant is missing.
 5) Wait for data
 6) getExperimentStats → CTR, significance, uplift
 7) finishExperiment (winner) OR pauseExperiment (more data needed)
@@ -381,4 +382,5 @@ If a tool fails:
 
 """)
   String chat(@MemoryId String sessionId, @UserMessage String message);
-}
+4) startExperiment > ACTIVE, GrowthBook SDK assigns users automatically
+   ??  SERVER ENFORCED: startExperiment WILL FAIL if variants < 2 or 'control' is missing.

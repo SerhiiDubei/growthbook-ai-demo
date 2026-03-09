@@ -180,6 +180,25 @@ public class ExperimentService {
         if (e.getStatus() == ExperimentStatus.FINISHED) throw new IllegalStateException("Already FINISHED");
         if (e.getStatus() == ExperimentStatus.FAILED) throw new IllegalStateException("Already FAILED");
 
+        // Enforce: experiment MUST have at least 2 variants (control + 1 treatment)
+        // and MUST include a 'control' variant before it can be started.
+        // This prevents the agent from starting an experiment without proper A/B setup.
+        List<ExperimentVariant> variants =
+                variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(id);
+        if (variants.size() < 2) {
+            throw new IllegalStateException(
+                    "Cannot start experiment id=" + id + ": requires at least 2 variants " +
+                    "(control + 1 treatment). Found: " + variants.size() + ". " +
+                    "Call addControlVariant and addSwapVariant/addTextVariant/etc. first.");
+        }
+        boolean hasControl = variants.stream()
+                .anyMatch(v -> "control".equalsIgnoreCase(v.getKey()));
+        if (!hasControl) {
+            throw new IllegalStateException(
+                    "Cannot start experiment id=" + id + ": missing 'control' variant. " +
+                    "Call addControlVariant first.");
+        }
+
         e.setStatus(ExperimentStatus.ACTIVE);
         e.setStartedAt(e.getStartedAt() == null ? LocalDateTime.now() : e.getStartedAt());
         e.setLastError(null);
@@ -190,14 +209,8 @@ public class ExperimentService {
             // Use upsertRecipeWithVariants when variants exist:
             // this updates native GB Experiment status → running AND re-fetches variation IDs via GET,
             // so upsertExperimentRefRule gets proper variationIds (not empty variations:[]).
-            List<ExperimentVariant> variants =
-                    variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(id);
-            if (variants.isEmpty()) {
-                gbSync.upsertRecipe(saved);
-            } else {
-                GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(saved, variants);
-                persistGbIds(saved, variants, syncResult);
-            }
+            GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(saved, variants);
+            persistGbIds(saved, variants, syncResult);
             gbSync.enable(saved);
             gbSync.syncStatus(saved);   // backup status patch → running
 
@@ -265,19 +278,27 @@ public class ExperimentService {
             throw new IllegalStateException("Can resume only PAUSED");
         }
 
+        // Same variant guard as start — paused experiment must still have proper variants
+        List<ExperimentVariant> variants =
+                variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(id);
+        if (variants.size() < 2) {
+            throw new IllegalStateException(
+                    "Cannot resume experiment id=" + id + ": requires at least 2 variants. Found: " + variants.size());
+        }
+        boolean hasControl = variants.stream()
+                .anyMatch(v -> "control".equalsIgnoreCase(v.getKey()));
+        if (!hasControl) {
+            throw new IllegalStateException(
+                    "Cannot resume experiment id=" + id + ": missing 'control' variant.");
+        }
+
         e.setStatus(ExperimentStatus.ACTIVE);
         e.setLastError(null);
         Experiment saved = experimentRepo.save(e);
 
         try {
-            List<ExperimentVariant> variants =
-                    variantRepo.findByExperimentIdOrderBySortOrderAscIdAsc(id);
-            if (variants.isEmpty()) {
-                gbSync.upsertRecipe(saved);
-            } else {
-                GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(saved, variants);
-                persistGbIds(saved, variants, syncResult);
-            }
+            GrowthBookSyncService.SyncResult syncResult = gbSync.upsertRecipeWithVariants(saved, variants);
+            persistGbIds(saved, variants, syncResult);
             gbSync.enable(saved);
             gbSync.syncStatus(saved);   // backup status patch → running
 
