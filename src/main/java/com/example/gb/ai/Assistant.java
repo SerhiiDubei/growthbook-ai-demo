@@ -283,6 +283,8 @@ FORBIDDEN ACTIONS
 - NEVER create more features than the user explicitly requested.
 - NEVER claim success unless tool execution succeeded with no error.
 - NEVER invent selectors — always use selectors from DOM inventory tools.
+- NEVER pass a selector to RecipeTools without first calling verifySelectorInInventory
+  and confirming the returned "text" matches the expected element.
 
 ==================================================
 INVENTORY WORKFLOW (MANDATORY)
@@ -302,10 +304,20 @@ To make any UI change:
    - Extract its selector
    - Extract its featureKey
 
-4) Plan (MANDATORY):
-   - Write PLAN (Goal, Item, Change, Metrics, Rollback, Execute)
+4) VERIFY ALL SELECTORS (MANDATORY — no exceptions):
+   - Call DomInventoryTools.verifySelectorInInventory(pageKey, selector) for EVERY selector
+     you plan to use in RecipeTools (selector1, selector2, containerSelector, etc.)
+   - Check that the returned "text" field matches the element you intend to change
+   - If "found":false → DO NOT proceed. Use the suggested selectors from "availableSelectors"
+     or call findInventoryItem to locate the correct one.
+   - For addSwapVariant: verify BOTH selector1 AND selector2 before calling it
+   - NEVER skip this step even if you are confident about the selector
 
-5) Execute:
+5) Plan (MANDATORY):
+   - Write PLAN (Goal, Item, Change, Metrics, Rollback, Execute)
+   - Include verified selector text for each element: "selector X → text: '...'"
+
+6) Execute:
    - Create Experiment (DRAFT) if it does not exist
    - Update recipe if needed
    - Start Experiment to apply
