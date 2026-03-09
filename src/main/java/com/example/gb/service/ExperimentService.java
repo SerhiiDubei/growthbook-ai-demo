@@ -15,9 +15,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -36,6 +39,8 @@ public class ExperimentService {
     private final ExperimentEventWriter eventWriter;
     private final ObjectMapper objectMapper;
     private final GrowthBookSyncService gbSync;
+    @Lazy
+    private final ExperimentService self;
 
 
 
@@ -78,7 +83,7 @@ public class ExperimentService {
         try {
             saved = experimentRepo.save(e);
         } catch (org.springframework.dao.DataIntegrityViolationException ex) {
-            var existing = experimentRepo.findByPageKeyAndKey(req.getPageKey(), req.getKey());
+            var existing = self.findExistingByPageKeyAndKey(req.getPageKey(), req.getKey());
             String msg = existing.map(exp ->
                     "Experiment already exists. Use existing experiment id=" + exp.getId() +
                             ". Call addControlVariant(" + exp.getId() + ") and addSwapVariant(" + exp.getId() + ",...) instead of createExperiment."
@@ -125,6 +130,11 @@ public class ExperimentService {
         return saved;
     }
 
+    /** Runs in new transaction to avoid Hibernate session pollution after DataIntegrityViolationException. */
+    @org.springframework.transaction.annotation.Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public java.util.Optional<Experiment> findExistingByPageKeyAndKey(String pageKey, String key) {
+        return experimentRepo.findByPageKeyAndKey(pageKey, key);
+    }
 
     // ---------- READ (читання) ----------
 
