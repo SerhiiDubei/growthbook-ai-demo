@@ -39,6 +39,14 @@ public class ExperimentService {
 
 
 
+    /**
+     * Saga-based create: saves as PENDING first, then syncs to GrowthBook.
+     * On GB failure — compensating actions (delete feature from GB) and marks FAILED.
+     * On success — transitions to DRAFT.
+     *
+     * This prevents "zombie" experiments that exist in DB but not in GB,
+     * and "zombie" features that exist in GB but not in DB.
+     */
     @Transactional
     public Experiment create(CreateExperimentRequest req, String actor) {
         log.info("➕ create experiment pageKey={} key={} featureKey={} actor={}",
@@ -50,19 +58,18 @@ public class ExperimentService {
         e.setPageKey(req.getPageKey());
         e.setPageUrl(req.getPageUrl());
         e.setKey(req.getKey());
-
         e.setTitle(req.getTitle());
         e.setDescription(req.getDescription());
         e.setFeatureKey(req.getFeatureKey());
-
         e.setOwner(req.getOwner());
         e.setPrimaryMetric(req.getPrimaryMetric());
         e.setNotes(req.getNotes());
-
         e.setRecipeJson(req.getRecipeJson());
         e.setAutonomyLevel(req.getAutonomyLevel() == null ? AutonomyLevel.AGENT_FULL : req.getAutonomyLevel());
 
-        e.setStatus(ExperimentStatus.DRAFT);
+        // Saga step 1: save as PENDING — marks that GB sync is in progress.
+        // If the app crashes between here and step 2, the cleanup job will compensate.
+        e.setStatus(ExperimentStatus.PENDING);
         e.setStartedAt(null);
         e.setFinishedAt(null);
         e.setLastError(null);
@@ -76,28 +83,40 @@ public class ExperimentService {
         }
 
         eventWriter.lifecycle(saved, "create", actor, recipeHash(saved.getRecipeJson()),
-                Map.of("result", "OK"), null);
+                Map.of("result", "PENDING"), null);
 
-        // GB sync for DRAFT: ensure recipe + DISABLED
+        // Saga step 2: sync to GrowthBook
         try {
-            gbSync.upsertRecipe(saved); // MUST be blocking in impl
-            gbSync.disable(saved);      // MUST be blocking in impl
+            gbSync.upsertRecipe(saved);
+            gbSync.disable(saved);
+
+            // Saga step 3: transition to DRAFT on success
+            saved.setStatus(ExperimentStatus.DRAFT);
+            saved.setLastError(null);
+            saved = experimentRepo.save(saved);
 
             eventWriter.lifecycle(saved, "create_gb_ok", actor, recipeHash(saved.getRecipeJson()),
                     Map.of("gb", "recipe_upserted_disabled"), null);
 
+            log.info("✅ create OK id={} status={} pageKey={} key={}",
+                    saved.getId(), saved.getStatus(), saved.getPageKey(), saved.getKey());
+
         } catch (Exception ex) {
+            log.warn("💥 create GB sync failed id={} err={} — running compensation", saved.getId(), ex.getMessage());
+
+            // Saga compensation: delete feature from GB (best-effort)
+            gbSync.deleteFeature(saved);
+
+            // Mark as FAILED so cleanup job and agent can see it
+            saved.setStatus(ExperimentStatus.FAILED);
             saved.setLastError("GB sync failed on create: " + ex.getMessage());
             saved = experimentRepo.save(saved);
 
             eventWriter.lifecycle(saved, "create_gb_failed", actor, recipeHash(saved.getRecipeJson()),
-                    Map.of("gb", "sync_failed"), ex);
+                    Map.of("gb", "sync_failed_compensated"), ex);
 
-            log.warn("⚠️ create OK in DB, but GB sync failed id={} err={}", saved.getId(), ex.getMessage());
+            log.warn("⚠️ create FAILED id={} — GB feature deleted (compensation), experiment marked FAILED", saved.getId());
         }
-
-        log.info("✅ create OK id={} status={} pageKey={} key={}",
-                saved.getId(), saved.getStatus(), saved.getPageKey(), saved.getKey());
 
         return saved;
     }
