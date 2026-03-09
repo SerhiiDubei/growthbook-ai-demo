@@ -354,6 +354,12 @@
   }
 
   function getGrowthBookInstance() {
+    // window._growthbook — used by auto bundle (@growthbook/growthbook/dist/bundles/auto.min.js)
+    if (isRealGrowthBook(window._growthbook)) {
+      console.debug("[GB-bridge] using window._growthbook (auto bundle)");
+      return window._growthbook;
+    }
+    // Legacy / manual bundle names
     if (isRealGrowthBook(window.growthbook)) {
       console.debug("[GB-bridge] using window.growthbook");
       return window.growthbook;
