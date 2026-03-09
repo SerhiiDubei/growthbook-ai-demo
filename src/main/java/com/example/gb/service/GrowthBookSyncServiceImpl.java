@@ -181,6 +181,30 @@ public class GrowthBookSyncServiceImpl implements GrowthBookSyncService {
         }
     }
 
+    @Override
+    public void deleteFeature(Experiment exp) {
+        String featureKey = exp.getFeatureKey();
+        if (featureKey == null || featureKey.isBlank()) return;
+        try {
+            gb.deleteFeature(featureKey).timeout(timeout).block();
+            log.info("✅ [GB sync] deleteFeature OK featureKey={}", featureKey);
+        } catch (Exception e) {
+            log.warn("⚠️ [GB sync] deleteFeature failed featureKey={} err={}", featureKey, e.getMessage());
+        }
+    }
+
+    @Override
+    public void deleteGbExperiment(Experiment exp) {
+        String gbExpId = exp.getGbExperimentId();
+        if (gbExpId == null || gbExpId.isBlank()) return;
+        try {
+            gb.deleteExperiment(gbExpId).timeout(timeout).block();
+            log.info("✅ [GB sync] deleteGbExperiment OK gbExpId={}", gbExpId);
+        } catch (Exception e) {
+            log.warn("⚠️ [GB sync] deleteGbExperiment failed gbExpId={} err={}", gbExpId, e.getMessage());
+        }
+    }
+
     private static String mapToGbStatus(ExperimentStatus status) {
         if (status == null) return "draft";
         return switch (status) {

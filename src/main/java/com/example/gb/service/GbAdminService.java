@@ -1005,6 +1005,16 @@ public class GbAdminService {
                 .doOnNext(_x -> log.info("✅ [GB] deleteFeature OK: {}", key));
     }
 
+    public Mono<String> deleteExperiment(String gbExperimentId) {
+        log.warn("🗑️ [GB] DELETE /experiments/{}", gbExperimentId);
+        return admin.delete()
+                .uri("/experiments/{id}", gbExperimentId)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> errWithBody(resp, "GB deleteExperiment error"))
+                .bodyToMono(String.class)
+                .doOnNext(_x -> log.info("✅ [GB] deleteExperiment OK: {}", gbExperimentId));
+    }
+
     // -------------------------------------------------------------------------
     // COMPATIBILITY METHODS
     // -------------------------------------------------------------------------

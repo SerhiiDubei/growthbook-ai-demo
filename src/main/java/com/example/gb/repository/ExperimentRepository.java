@@ -2,6 +2,8 @@ package com.example.gb.repository;
 
 import com.example.gb.model.Experiment;
 import com.example.gb.model.enums.ExperimentStatus;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,5 +23,8 @@ public interface ExperimentRepository extends JpaRepository<Experiment, Long> {
     Optional<Experiment> findFirstByFeatureKeyAndStatusOrderByUpdatedAtDesc(String featureKey, ExperimentStatus status);
 
     Optional<Experiment> findFirstByFeatureKeyOrderByUpdatedAtDesc(String featureKey);
+
+    /** Find stale PENDING experiments older than a given time (for cleanup job). */
+    List<Experiment> findByStatusAndUpdatedAtBefore(ExperimentStatus status, LocalDateTime before);
 
 }

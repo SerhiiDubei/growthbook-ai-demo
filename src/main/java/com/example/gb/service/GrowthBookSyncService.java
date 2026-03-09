@@ -42,6 +42,18 @@ public interface GrowthBookSyncService {
     String fetchGbStatus(Experiment exp);
 
     /**
+     * Compensation action: delete feature from GrowthBook.
+     * Best-effort: logs but does not throw on failure.
+     */
+    void deleteFeature(Experiment exp);
+
+    /**
+     * Compensation action: delete native GB Experiment from GrowthBook.
+     * Best-effort: logs but does not throw on failure.
+     */
+    void deleteGbExperiment(Experiment exp);
+
+    /**
      * Result of syncing an experiment with variants to GrowthBook.
      * Contains native GB Experiment ID and per-variant GB Variation ID mapping.
      */
