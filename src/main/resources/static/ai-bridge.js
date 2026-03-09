@@ -354,6 +354,12 @@
   }
 
   function getGrowthBookInstance() {
+    // window._growthbook — used by auto bundle (@growthbook/growthbook/dist/bundles/auto.min.js)
+    if (isRealGrowthBook(window._growthbook)) {
+      console.debug("[GB-bridge] using window._growthbook (auto bundle)");
+      return window._growthbook;
+    }
+    // Legacy / manual bundle names
     if (isRealGrowthBook(window.growthbook)) {
       console.debug("[GB-bridge] using window.growthbook");
       return window.growthbook;
@@ -586,20 +592,20 @@
 
     console.debug("[GB-bridge] hooking GrowthBook instance");
 
-    // Set id attribute — GB SDK uses "id" for experiment bucketing (hashing)
+    // Set id attribute — GB SDK uses "id" for experiment bucketing (hashing).
+    // sessionTag always wins: if ?gbtag= is present in URL we must use it so that
+    // manual QA/testing of specific variants works reliably even when gbuuid cookie exists.
     if (typeof gb.setAttributes === "function") {
       try {
         const base = (typeof gb.getAttributes === "function" && gb.getAttributes()) || {};
-        if (!base.id) {
-          gb.setAttributes({
-            ...base,
-            id: sessionTag,
-            url: location.href,
-            device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop",
-            sessionTag
-          });
-          console.debug("[GB-bridge] GB attributes set: id=", sessionTag);
-        }
+        gb.setAttributes({
+          ...base,
+          id: sessionTag,
+          url: location.href,
+          device: /Mobi/.test(navigator.userAgent) ? "mobile" : "desktop",
+          sessionTag
+        });
+        console.debug("[GB-bridge] GB attributes set: id=", sessionTag);
       } catch (e) {
         console.debug("[GB-bridge] setAttributes in hookGrowthBook failed", e);
       }
