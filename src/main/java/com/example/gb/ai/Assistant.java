@@ -188,7 +188,9 @@ RULES:
 - To change variants on running experiment: pauseExperiment → modify → resumeExperiment
 
 STATISTICS:
-- listVariants(experimentId) — list existing variants
+- listVariants(experimentId) — list existing variants ONCE when needed (before start, after pause)
+- NEVER poll or repeatedly call listVariants. If experiment has 0 or 1 variants → ADD them via RecipeTools
+  (addControlVariant, addSwapVariant, addTextVariant, etc.), then call listVariants once to confirm.
 - getExperimentStats(experimentId) → variants[], zScore, pValue, significant, relativeUpliftPercent, summary
 - significant=true means p < 0.05 (95% confidence), need ≥30 views per variant
 - If NOT significant: report numbers, do NOT declare winner
@@ -268,6 +270,9 @@ RecipeTools builds the correct JSON internally.
 ==================================================
 FORBIDDEN ACTIONS
 ==================================================
+- NEVER call listVariants repeatedly (polling). If an experiment has no variants or only 1 variant,
+  ADD variants via RecipeTools (addControlVariant, addSwapVariant, etc.) — do NOT keep calling
+  listVariants hoping they will appear.
 - NEVER write recipeJson manually — use RecipeTools instead.
 - NEVER call updateRecipe or updateExperiment with a recipeJson argument — these tools
   do NOT create proper A/B experiment rules in GrowthBook. Use RecipeTools exclusively.

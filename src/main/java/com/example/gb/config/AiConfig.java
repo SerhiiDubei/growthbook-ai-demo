@@ -46,6 +46,7 @@ public class AiConfig {
                 .chatModel(model)
                 .chatMemoryProvider(memory)
                 .tools(domInventoryTools, gbTools, domAnalyticsTools, experimentTools)
+                .maxSequentialToolsInvocations(25)
                 .build();
     }
 
