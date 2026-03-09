@@ -194,6 +194,62 @@ public class DomInventoryTools {
         }
     }
 
+    // ---------- SELECTOR VERIFICATION ----------
+
+    @Tool("""
+          Verify that a CSS selector exists in the stored DOM inventory for a page.
+          Use this BEFORE passing any selector to RecipeTools to confirm it points to
+          the expected element.
+          Returns JSON:
+            {"found":true,  "selector":"...","kind":"...","text":"...","featureKey":"..."}
+            {"found":false, "selector":"...","error":"No item with this selector"}
+          ALWAYS call this for every selector you plan to use in addSwapVariant,
+          addTextVariant, addStyleVariant, etc. to confirm text matches your expectation.
+          """)
+    public String verifySelectorInInventory(
+            @P("Page key") String pageKey,
+            @P("CSS selector to verify") String selector
+    ) {
+        try {
+            var e = latestRepo.findByPageKey(pageKey)
+                    .orElseThrow(() -> new IllegalArgumentException("No inventory for pageKey=" + pageKey));
+
+            String normalizedSelector = selector == null ? "" : selector.trim();
+
+            List<ItemJson> items = parseItems(e.getItemsJson());
+            var match = items.stream()
+                    .filter(i -> normalizedSelector.equalsIgnoreCase(
+                            i.getSelector() == null ? "" : i.getSelector().trim()))
+                    .findFirst();
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            if (match.isPresent()) {
+                ItemJson item = match.get();
+                out.put("found", true);
+                out.put("selector", item.getSelector());
+                out.put("kind", item.getKind());
+                out.put("text", item.getText());
+                out.put("featureKey", item.getFeatureKey());
+            } else {
+                out.put("found", false);
+                out.put("selector", normalizedSelector);
+                out.put("error", "No item with this selector found in inventory for pageKey=" + pageKey);
+                // suggest similar items by text search
+                List<String> suggestions = items.stream()
+                        .filter(i -> i.getSelector() != null && !i.getSelector().isBlank())
+                        .limit(5)
+                        .map(i -> i.getSelector() + "  [" + i.getKind() + ": " + i.getText() + "]")
+                        .toList();
+                if (!suggestions.isEmpty()) {
+                    out.put("availableSelectors", suggestions);
+                }
+            }
+            return toJson(out);
+        } catch (Exception ex) {
+            return "ERROR: " + safeMsg(ex);
+        }
+    }
+
     // ---------- LEGACY (RAW) ----------
 
     @Tool("""
