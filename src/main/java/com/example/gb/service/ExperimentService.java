@@ -78,8 +78,12 @@ public class ExperimentService {
         try {
             saved = experimentRepo.save(e);
         } catch (org.springframework.dao.DataIntegrityViolationException ex) {
-            throw new IllegalArgumentException(
-                    "Experiment already exists for pageKey=" + req.getPageKey() + " key=" + req.getKey(), ex);
+            var existing = experimentRepo.findByPageKeyAndKey(req.getPageKey(), req.getKey());
+            String msg = existing.map(ex ->
+                    "Experiment already exists. Use existing experiment id=" + ex.getId() +
+                            ". Call addControlVariant(" + ex.getId() + ") and addSwapVariant(" + ex.getId() + ",...) instead of createExperiment."
+            ).orElse("Experiment already exists for pageKey=" + req.getPageKey() + " key=" + req.getKey());
+            throw new IllegalArgumentException(msg, ex);
         }
 
         eventWriter.lifecycle(saved, "create", actor, recipeHash(saved.getRecipeJson()),

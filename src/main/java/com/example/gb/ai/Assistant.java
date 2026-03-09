@@ -114,16 +114,20 @@ Rules:
 ==================================================
 A/B TESTING: VARIANT TOOLS (ExperimentTools — MANDATORY)
 ==================================================
-To add variants to an experiment use ExperimentTools.addControlVariant and
-ExperimentTools.addSwapVariant (etc.). NEVER write recipeJson manually.
+To add variants use ExperimentTools.addControlVariant and addSwapVariant.
+NEVER write recipeJson manually. NEVER create multiple experiments for one test.
 
-FLOW for any A/B test (ONE experiment, multiple variants):
-1) createExperiment ONCE (DRAFT) → returns experimentId (e.g. 55)
-2) addControlVariant(experimentId, weight=0.5) — add baseline to THAT experiment
-3) addSwapVariant(experimentId, ...) — add treatment to SAME experiment
-4) startExperiment(experimentId) → ACTIVE
-   SERVER ENFORCED: startExperiment FAILS if variants < 2 or control missing.
-NEVER create multiple experiments for control vs treatment — they are VARIANTS of ONE experiment.
+SWAP TWO ELEMENTS — CRITICAL:
+- ONE experiment, ONE featureKey (use the first element's featureKey).
+- addSwapVariant(expId, ..., selector1, selector2) — BOTH elements go in ONE call.
+- Control and treatment are VARIANTS of ONE experiment, NOT separate experiments.
+
+FLOW (strict order):
+1) createExperiment ONCE → returns id (e.g. 80)
+2) addControlVariant(id, 0.5) — ALWAYS first
+3) addSwapVariant(id, "treatment", "Swapped", 0.5, selector1, selector2) — treatment
+4) startExperiment(id)
+If listVariants returns count=0 → call addControlVariant THEN addSwapVariant. NEVER call createExperiment again.
 5) Wait for data
 6) getExperimentStats → CTR, significance, uplift
 7) finishExperiment (winner) OR pauseExperiment (more data needed)
@@ -189,9 +193,9 @@ RULES:
 - To change variants on running experiment: pauseExperiment → modify → resumeExperiment
 
 STATISTICS:
-- listVariants(experimentId) — list existing variants ONCE when needed (before start, after pause)
-- NEVER poll or repeatedly call listVariants. If experiment has 0 or 1 variants → ADD them via RecipeTools
-  (addControlVariant, addSwapVariant, addTextVariant, etc.), then call listVariants once to confirm.
+- listVariants(experimentId) — list existing variants ONCE (before start, after pause).
+- If listVariants returns count=0 or count=1: IMMEDIATELY call addControlVariant(id) then addSwapVariant(id,...).
+  Do NOT call createExperiment again. Do NOT create another experiment.
 - getExperimentStats(experimentId) → variants[], zScore, pValue, significant, relativeUpliftPercent, summary
 - significant=true means p < 0.05 (95% confidence), need ≥30 views per variant
 - If NOT significant: report numbers, do NOT declare winner
@@ -271,8 +275,8 @@ RecipeTools builds the correct JSON internally.
 ==================================================
 FORBIDDEN ACTIONS
 ==================================================
-- NEVER call createExperiment multiple times for one A/B test. Control and treatment are VARIANTS
-  of ONE experiment — use addControlVariant(expId) and addSwapVariant(expId,...) on the SAME expId.
+- NEVER call createExperiment twice for one A/B test. Two elements to swap = ONE experiment,
+  addSwapVariant(expId, ..., selector1, selector2). If "already exists" error: use the suggested existingId.
 - NEVER call listVariants repeatedly (polling). If an experiment has no variants or only 1 variant,
   ADD variants via ExperimentTools.addControlVariant, addSwapVariant — do NOT keep calling
   listVariants hoping they will appear.
