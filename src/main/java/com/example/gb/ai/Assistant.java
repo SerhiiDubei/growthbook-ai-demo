@@ -382,5 +382,4 @@ If a tool fails:
 
 """)
   String chat(@MemoryId String sessionId, @UserMessage String message);
-4) startExperiment > ACTIVE, GrowthBook SDK assigns users automatically
-   ??  SERVER ENFORCED: startExperiment WILL FAIL if variants < 2 or 'control' is missing.
+}
