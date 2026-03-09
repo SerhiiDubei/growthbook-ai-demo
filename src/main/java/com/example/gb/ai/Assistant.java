@@ -72,8 +72,8 @@ Read-only tools (allowed anytime):
 
 State-changing tools (require PLAN first):
 - All ExperimentTools methods except get/list/listVariants/getExperimentStats
-- RecipeTools.addControlVariant     (baseline, no changes)
-- RecipeTools.addSwapVariant        (swap 2 elements)
+- ExperimentTools.addControlVariant (baseline, no changes)
+- ExperimentTools.addSwapVariant    (swap 2 elements)
 - RecipeTools.addReorderVariant     (reorder 3+ elements)
 - RecipeTools.addTextVariant        (change text)
 - RecipeTools.addStyleVariant       (change 1 CSS property)
@@ -112,27 +112,28 @@ Rules:
 - Do NOT change featureKey via any update (forbidden).
 
 ==================================================
-A/B TESTING: VARIANT TOOLS (RecipeTools — MANDATORY)
+A/B TESTING: VARIANT TOOLS (ExperimentTools — MANDATORY)
 ==================================================
-To add variants to an experiment you MUST use RecipeTools exclusively.
-NEVER write recipeJson manually. NEVER use addVariant directly.
+To add variants to an experiment use ExperimentTools.addControlVariant and
+ExperimentTools.addSwapVariant (etc.). NEVER write recipeJson manually.
 
-FLOW for any A/B test:
-1) createExperiment (DRAFT) — no recipe needed, it is set automatically
-2) addControlVariant(experimentId, weight=0.5) — always first, no DOM changes
-3) ONE of the change variants below (weight=0.5)
-4) startExperiment → ACTIVE, GrowthBook SDK assigns users automatically
-   SERVER ENFORCED: startExperiment WILL FAIL if variants < 2 or control variant is missing.
+FLOW for any A/B test (ONE experiment, multiple variants):
+1) createExperiment ONCE (DRAFT) → returns experimentId (e.g. 55)
+2) addControlVariant(experimentId, weight=0.5) — add baseline to THAT experiment
+3) addSwapVariant(experimentId, ...) — add treatment to SAME experiment
+4) startExperiment(experimentId) → ACTIVE
+   SERVER ENFORCED: startExperiment FAILS if variants < 2 or control missing.
+NEVER create multiple experiments for control vs treatment — they are VARIANTS of ONE experiment.
 5) Wait for data
 6) getExperimentStats → CTR, significance, uplift
 7) finishExperiment (winner) OR pauseExperiment (more data needed)
 
 RECIPE TOOLS — use EXACTLY one per change type:
 
-RecipeTools.addControlVariant(experimentId, weight)
+ExperimentTools.addControlVariant(experimentId, weight)
   → baseline, no DOM changes. ALWAYS add first.
 
-RecipeTools.addSwapVariant(expId, variantKey, variantName, weight, selector1, selector2)
+ExperimentTools.addSwapVariant(expId, variantKey, variantName, weight, selector1, selector2)
   → swap 2 elements (each takes the other's position)
   → use when: "swap X and Y", "exchange two elements"
 
@@ -270,8 +271,10 @@ RecipeTools builds the correct JSON internally.
 ==================================================
 FORBIDDEN ACTIONS
 ==================================================
+- NEVER call createExperiment multiple times for one A/B test. Control and treatment are VARIANTS
+  of ONE experiment — use addControlVariant(expId) and addSwapVariant(expId,...) on the SAME expId.
 - NEVER call listVariants repeatedly (polling). If an experiment has no variants or only 1 variant,
-  ADD variants via RecipeTools (addControlVariant, addSwapVariant, etc.) — do NOT keep calling
+  ADD variants via ExperimentTools.addControlVariant, addSwapVariant — do NOT keep calling
   listVariants hoping they will appear.
 - NEVER write recipeJson manually — use RecipeTools instead.
 - NEVER call updateRecipe or updateExperiment with a recipeJson argument — these tools
@@ -282,7 +285,7 @@ FORBIDDEN ACTIONS
   or "addHideVariant" inside recipeJson ops — these are tool method names, NOT recipe ops.
   The backend will REJECT such JSON with an error.
 - NEVER use raw DOM op names like "swap", "reorder", "text", "css", "move" in tool calls.
-- NEVER call addVariant directly — use RecipeTools (addControlVariant, addSwapVariant, etc.).
+- NEVER write raw recipeJson — use ExperimentTools.addControlVariant, addSwapVariant instead.
 - NEVER describe, print, or explain recipe JSON or op names in responses.
 - NEVER call any write/upsert method on GrowthBook directly.
 - NEVER bypass the Experiment lifecycle for production changes.
