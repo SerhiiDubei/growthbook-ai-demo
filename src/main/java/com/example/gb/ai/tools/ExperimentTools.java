@@ -30,12 +30,13 @@ public class ExperimentTools {
 
     private static final Logger log = LoggerFactory.getLogger(ExperimentTools.class);
 
-    private static final String ACTOR = "agent"; // ✅ зафіксовано
+    private static final String ACTOR = "agent";
 
     private final ExperimentService experimentService;
     private final GrowthBookSyncService gbSync;
     private final StatisticsService statisticsService;
     private final ObjectMapper objectMapper;
+    private final RecipeTools recipeTools;
 
     // ------------------------------------------------------------
     // CREATE
@@ -350,12 +351,38 @@ public class ExperimentTools {
     }
 
     // ------------------------------------------------------------
-    // A/B VARIANTS
+    // A/B VARIANTS (delegate to RecipeTools — semantic wrappers, no raw JSON)
     // ------------------------------------------------------------
 
+    @Tool("""
+          Add CONTROL variant to an experiment — no DOM changes, original layout.
+          ALWAYS add first before any treatment. weight e.g. 0.5 for 50%%.
+          """)
+    public String addControlVariant(
+            @P("Experiment id") long experimentId,
+            @P("Traffic weight, e.g. 0.5") double weight
+    ) {
+        return recipeTools.addControlVariant(experimentId, weight);
+    }
+
+    @Tool("""
+          Add SWAP treatment variant — exchange position of two elements.
+          selector1, selector2 from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addSwapVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Swapped buttons'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector first element (from inventory)") String selector1,
+            @P("CSS selector second element (from inventory)") String selector2
+    ) {
+        return recipeTools.addSwapVariant(experimentId, variantKey, variantName, weight, selector1, selector2);
+    }
+
     /**
-     * Kept for internal/legacy use but hidden from the agent.
-     * Agents must use RecipeTools (addControlVariant, addSwapVariant, etc.) instead.
+     * Low-level addVariant — not exposed to agent (no @Tool).
+     * Agent must use addControlVariant, addSwapVariant above.
      */
     public String addVariant(
             long experimentId, String key, String name, double weight,

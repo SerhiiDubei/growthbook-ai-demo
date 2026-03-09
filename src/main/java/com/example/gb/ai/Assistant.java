@@ -72,8 +72,8 @@ Read-only tools (allowed anytime):
 
 State-changing tools (require PLAN first):
 - All ExperimentTools methods except get/list/listVariants/getExperimentStats
-- RecipeTools.addControlVariant     (baseline, no changes)
-- RecipeTools.addSwapVariant        (swap 2 elements)
+- ExperimentTools.addControlVariant (baseline, no changes)
+- ExperimentTools.addSwapVariant    (swap 2 elements)
 - RecipeTools.addReorderVariant     (reorder 3+ elements)
 - RecipeTools.addTextVariant        (change text)
 - RecipeTools.addStyleVariant       (change 1 CSS property)
@@ -112,27 +112,32 @@ Rules:
 - Do NOT change featureKey via any update (forbidden).
 
 ==================================================
-A/B TESTING: VARIANT TOOLS (RecipeTools — MANDATORY)
+A/B TESTING: VARIANT TOOLS (ExperimentTools — MANDATORY)
 ==================================================
-To add variants to an experiment you MUST use RecipeTools exclusively.
-NEVER write recipeJson manually. NEVER use addVariant directly.
+To add variants use ExperimentTools.addControlVariant and addSwapVariant.
+NEVER write recipeJson manually. NEVER create multiple experiments for one test.
 
-FLOW for any A/B test:
-1) createExperiment (DRAFT) — no recipe needed, it is set automatically
-2) addControlVariant(experimentId, weight=0.5) — always first, no DOM changes
-3) ONE of the change variants below (weight=0.5)
-4) startExperiment → ACTIVE, GrowthBook SDK assigns users automatically
-   SERVER ENFORCED: startExperiment WILL FAIL if variants < 2 or control variant is missing.
+SWAP TWO ELEMENTS — CRITICAL:
+- ONE experiment, ONE featureKey (use the first element's featureKey).
+- addSwapVariant(expId, ..., selector1, selector2) — BOTH elements go in ONE call.
+- Control and treatment are VARIANTS of ONE experiment, NOT separate experiments.
+
+FLOW (strict order):
+1) createExperiment ONCE → returns id (e.g. 80)
+2) addControlVariant(id, 0.5) — ALWAYS first
+3) addSwapVariant(id, "treatment", "Swapped", 0.5, selector1, selector2) — treatment
+4) startExperiment(id)
+If listVariants returns count=0 → call addControlVariant THEN addSwapVariant. NEVER call createExperiment again.
 5) Wait for data
 6) getExperimentStats → CTR, significance, uplift
 7) finishExperiment (winner) OR pauseExperiment (more data needed)
 
 RECIPE TOOLS — use EXACTLY one per change type:
 
-RecipeTools.addControlVariant(experimentId, weight)
+ExperimentTools.addControlVariant(experimentId, weight)
   → baseline, no DOM changes. ALWAYS add first.
 
-RecipeTools.addSwapVariant(expId, variantKey, variantName, weight, selector1, selector2)
+ExperimentTools.addSwapVariant(expId, variantKey, variantName, weight, selector1, selector2)
   → swap 2 elements (each takes the other's position)
   → use when: "swap X and Y", "exchange two elements"
 
@@ -188,9 +193,9 @@ RULES:
 - To change variants on running experiment: pauseExperiment → modify → resumeExperiment
 
 STATISTICS:
-- listVariants(experimentId) — list existing variants ONCE when needed (before start, after pause)
-- NEVER poll or repeatedly call listVariants. If experiment has 0 or 1 variants → ADD them via RecipeTools
-  (addControlVariant, addSwapVariant, addTextVariant, etc.), then call listVariants once to confirm.
+- listVariants(experimentId) — list existing variants ONCE (before start, after pause).
+- If listVariants returns count=0 or count=1: IMMEDIATELY call addControlVariant(id) then addSwapVariant(id,...).
+  Do NOT call createExperiment again. Do NOT create another experiment.
 - getExperimentStats(experimentId) → variants[], zScore, pValue, significant, relativeUpliftPercent, summary
 - significant=true means p < 0.05 (95% confidence), need ≥30 views per variant
 - If NOT significant: report numbers, do NOT declare winner
@@ -270,8 +275,10 @@ RecipeTools builds the correct JSON internally.
 ==================================================
 FORBIDDEN ACTIONS
 ==================================================
+- NEVER call createExperiment twice for one A/B test. Two elements to swap = ONE experiment,
+  addSwapVariant(expId, ..., selector1, selector2). If "already exists" error: use the suggested existingId.
 - NEVER call listVariants repeatedly (polling). If an experiment has no variants or only 1 variant,
-  ADD variants via RecipeTools (addControlVariant, addSwapVariant, etc.) — do NOT keep calling
+  ADD variants via ExperimentTools.addControlVariant, addSwapVariant — do NOT keep calling
   listVariants hoping they will appear.
 - NEVER write recipeJson manually — use RecipeTools instead.
 - NEVER call updateRecipe or updateExperiment with a recipeJson argument — these tools
@@ -282,7 +289,7 @@ FORBIDDEN ACTIONS
   or "addHideVariant" inside recipeJson ops — these are tool method names, NOT recipe ops.
   The backend will REJECT such JSON with an error.
 - NEVER use raw DOM op names like "swap", "reorder", "text", "css", "move" in tool calls.
-- NEVER call addVariant directly — use RecipeTools (addControlVariant, addSwapVariant, etc.).
+- NEVER write raw recipeJson — use ExperimentTools.addControlVariant, addSwapVariant instead.
 - NEVER describe, print, or explain recipe JSON or op names in responses.
 - NEVER call any write/upsert method on GrowthBook directly.
 - NEVER bypass the Experiment lifecycle for production changes.
