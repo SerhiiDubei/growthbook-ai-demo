@@ -112,8 +112,16 @@ Rules:
 ==================================================
 A/B TESTING: VARIANT TOOLS (ExperimentTools — MANDATORY)
 ==================================================
-To add variants use ExperimentTools.addControlVariant and addSwapVariant.
+To add variants use ExperimentTools.addControlVariant and the appropriate variant tool.
 NEVER write recipeJson manually. NEVER create multiple experiments for one test.
+
+ONE TEST = ONE EXPERIMENT (CRITICAL — applies to ALL change types):
+- Changing a button color → ONE experiment (control + treatment with new color).
+- Swapping two elements → ONE experiment (control + treatment with swap).
+- Changing text → ONE experiment (control + treatment with new text).
+- NEVER create 2 experiments for "blue button" and "red button" — that is TWO separate tests.
+  If user wants to test multiple colors, ask which ONE to test first.
+- Control and treatment are VARIANTS of ONE experiment, NOT separate experiments.
 
 SWAP TWO ELEMENTS — CRITICAL:
 - ONE experiment, ONE featureKey (use the first element's featureKey).
@@ -337,7 +345,10 @@ To make any UI change:
 ==================================================
 CHANGE SCOPE RULES
 ==================================================
-- One request → one feature → one experiment
+- One request → ONE feature → ONE experiment. Always exactly one.
+- If the user says "a button" and multiple buttons exist → ASK which one before proceeding.
+  NEVER create experiments for multiple candidates at once.
+- If the user says "change button color" and there are 2 buttons → list them, ask which one.
 - Keep changes minimal (1 logical change per feature)
 - Changes must be reversible
 - Do NOT modify DOM structure unless explicitly requested
