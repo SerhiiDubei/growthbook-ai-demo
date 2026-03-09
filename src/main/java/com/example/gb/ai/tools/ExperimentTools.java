@@ -380,6 +380,167 @@ public class ExperimentTools {
         return recipeTools.addSwapVariant(experimentId, variantKey, variantName, weight, selector1, selector2);
     }
 
+    @Tool("""
+          Add REORDER treatment variant — reorder 3+ direct children inside a container.
+          containerSelector: CSS selector of the parent. orderedSelectors: comma-separated child selectors.
+          weight e.g. 0.5.
+          """)
+    public String addReorderVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Stats first layout'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the container element (from inventory)") String containerSelector,
+            @P("Comma-separated CSS selectors of children in desired order") String orderedSelectors
+    ) {
+        return recipeTools.addReorderVariant(experimentId, variantKey, variantName, weight, containerSelector, orderedSelectors);
+    }
+
+    @Tool("""
+          Add TEXT treatment variant — change plain text content of ONE element.
+          Use when: "change heading", "rename button", "test different copy".
+          selector from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addTextVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'New CTA copy'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("New text content") String newText
+    ) {
+        return recipeTools.addTextVariant(experimentId, variantKey, variantName, weight, selector, newText);
+    }
+
+    @Tool("""
+          Add STYLE treatment variant — change ONE CSS property of ONE element.
+          cssProperty: kebab-case, e.g. "background-color". cssValue: e.g. "#ff0000".
+          weight e.g. 0.5.
+          """)
+    public String addStyleVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Red button'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("CSS property in kebab-case, e.g. 'background-color'") String cssProperty,
+            @P("CSS value, e.g. '#ff0000' or '18px'") String cssValue
+    ) {
+        return recipeTools.addStyleVariant(experimentId, variantKey, variantName, weight, selector, cssProperty, cssValue);
+    }
+
+    @Tool("""
+          Add MULTI-STYLE treatment variant — change MULTIPLE CSS properties at once on ONE element.
+          styleJson: camelCase JSON, e.g. {"backgroundColor":"#f00","color":"#fff","borderRadius":"8px"}.
+          weight e.g. 0.5.
+          """)
+    public String addMultiStyleVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Bold red CTA'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("JSON object of camelCase CSS properties, e.g. {\"backgroundColor\":\"#f00\",\"color\":\"#fff\"}") String styleJson
+    ) {
+        return recipeTools.addMultiStyleVariant(experimentId, variantKey, variantName, weight, selector, styleJson);
+    }
+
+    @Tool("""
+          Add HTML treatment variant — replace inner HTML of ONE element.
+          Use when: "add icon to label", "change HTML structure inside element".
+          selector from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addHtmlVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Bold CTA label'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("New inner HTML content") String htmlContent
+    ) {
+        return recipeTools.addHtmlVariant(experimentId, variantKey, variantName, weight, selector, htmlContent);
+    }
+
+    @Tool("""
+          Add ATTR treatment variant — change an HTML attribute of ONE element.
+          attributeName: href | src | alt | title | aria-label | role | target | data-variant | data-test | rel.
+          weight e.g. 0.5.
+          """)
+    public String addAttrVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'New link target'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("Attribute name: href | src | alt | title | aria-label | role | target | data-variant | data-test | rel") String attributeName,
+            @P("New attribute value") String attributeValue
+    ) {
+        return recipeTools.addAttrVariant(experimentId, variantKey, variantName, weight, selector, attributeName, attributeValue);
+    }
+
+    @Tool("""
+          Add IMAGE treatment variant — change the src of an <img> element.
+          Use when: "test different image", "change hero photo", "swap banner image".
+          selector from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addImageVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Product photo B'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the <img> element (from inventory)") String selector,
+            @P("New image URL, e.g. '/images/hero-b.jpg'") String imageSrc
+    ) {
+        return recipeTools.addImageVariant(experimentId, variantKey, variantName, weight, selector, imageSrc);
+    }
+
+    @Tool("""
+          Add CLASS-ADD treatment variant — add a CSS class to ONE element.
+          Use when: "highlight this section", "activate a pre-existing style via class".
+          selector from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addClassAddVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'Highlighted CTA'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("CSS class name to ADD (without dot), e.g. 'featured'") String className
+    ) {
+        return recipeTools.addClassAddVariant(experimentId, variantKey, variantName, weight, selector, className);
+    }
+
+    @Tool("""
+          Add CLASS-REMOVE treatment variant — remove a CSS class from ONE element.
+          Use when: "remove highlight", "deactivate a style class".
+          selector from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addClassRemoveVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'No highlight'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element (from inventory)") String selector,
+            @P("CSS class name to REMOVE (without dot), e.g. 'featured'") String className
+    ) {
+        return recipeTools.addClassRemoveVariant(experimentId, variantKey, variantName, weight, selector, className);
+    }
+
+    @Tool("""
+          Add HIDE treatment variant — hide/remove ONE element from the page entirely.
+          Use when: "hide the promo banner", "remove section", "test without element".
+          selector from DOM inventory. weight e.g. 0.5.
+          """)
+    public String addHideVariant(
+            @P("Experiment id") long experimentId,
+            @P("Variant key, e.g. 'treatment'") String variantKey,
+            @P("Human name, e.g. 'No promo banner'") String variantName,
+            @P("Traffic weight, e.g. 0.5") double weight,
+            @P("CSS selector of the element to hide (from inventory)") String selector
+    ) {
+        return recipeTools.addHideVariant(experimentId, variantKey, variantName, weight, selector);
+    }
+
     /**
      * Low-level addVariant — not exposed to agent (no @Tool).
      * Agent must use addControlVariant, addSwapVariant above.
