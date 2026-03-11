@@ -33,6 +33,8 @@
   const FEATURE_VARIANTS = {};
   // canonical featureKeys returned by backend after inventory POST
   const KNOWN_FEATURE_KEYS = [];
+  // featureKey → selector mapping (populated from backend inventory response)
+  const FEATURE_KEY_TO_SELECTOR = {};
 
   // ---------- SITE / PAGE IDS (must match backend DomPageKeyUtil logic) ----------
 
@@ -288,6 +290,10 @@
           data.items.forEach(it => {
             if (it.featureKey && !KNOWN_FEATURE_KEYS.includes(it.featureKey)) {
               KNOWN_FEATURE_KEYS.push(it.featureKey);
+            }
+            // Store featureKey → selector mapping for control click tracking
+            if (it.featureKey && it.selector) {
+              FEATURE_KEY_TO_SELECTOR[it.featureKey] = it.selector;
             }
           });
           console.debug("[GB-bridge] received featureKeys from backend:", KNOWN_FEATURE_KEYS.length, KNOWN_FEATURE_KEYS);
@@ -714,6 +720,61 @@
     })();
   }
 
+  // ---------- Click tracking for control variant ----------
+
+  /**
+   * Control variant has ops:[] — makeOpApplier never runs, so no click listener is bound.
+   * This function finds the DOM element for the featureKey via stored inventory
+   * (sessionStorage __GB_INV__) and binds a click listener directly.
+   * Only binds if the element is found and not already bound (CLICK_BOUND WeakSet).
+   */
+  function bindClickForControlVariant(featureKey, sessTag, pageUrl) {
+    try {
+      // Use the featureKey→selector map populated from backend inventory response
+      const selector = FEATURE_KEY_TO_SELECTOR[featureKey];
+      if (!selector) {
+        console.debug("[GB-bridge] bindClickForControl: no selector for featureKey", featureKey);
+        return;
+      }
+
+      const nodes = document.querySelectorAll(selector);
+      if (!nodes.length) {
+        console.debug("[GB-bridge] bindClickForControl: element not found in DOM", selector);
+        return;
+      }
+
+      const assignedVariant = FEATURE_VARIANTS[featureKey] || "control";
+
+      nodes.forEach(el => {
+        if (CLICK_BOUND.has(el)) return;
+        CLICK_BOUND.add(el);
+
+        el.addEventListener("click", () => {
+          const tag  = sessTag || readCookie("gb_tag") || sessionTag || "";
+          const page = pageUrl || location.href;
+
+          sendTrackEvent({
+            featureKey,
+            variation: assignedVariant,
+            variantKey: assignedVariant,
+            sessionTag: tag,
+            page,
+            action: "click",
+            meta: {
+              source: "dom-bridge",
+              selector,
+              kind: "control"
+            }
+          });
+        }, { passive: true });
+
+        console.debug("[GB-bridge] bindClickForControl: bound click on", selector, "for", featureKey);
+      });
+    } catch (e) {
+      console.debug("[GB-bridge] bindClickForControlVariant failed", featureKey, e);
+    }
+  }
+
   // ---------- Apply features + send "view" once ----------
 
   function applyDomFeatures() {
@@ -772,6 +833,13 @@
         }
         if (Array.isArray(val.ops)) {
           val.ops.forEach(applyOp);
+        }
+
+        // For control variant (ops:[]) — no DOM ops run, so click listener is never bound.
+        // Fix: find the element via inventory and bind click tracking manually.
+        const isControl = Array.isArray(val.ops) && val.ops.length === 0;
+        if (isControl) {
+          bindClickForControlVariant(key, currentSessionTag, pageUrl);
         }
       }
 
