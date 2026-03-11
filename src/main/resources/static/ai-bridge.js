@@ -834,13 +834,16 @@
         if (Array.isArray(val.ops)) {
           val.ops.forEach(applyOp);
         }
+      }
 
-        // For control variant (ops:[]) — no DOM ops run, so click listener is never bound.
-        // Fix: find the element via inventory and bind click tracking manually.
-        const isControl = Array.isArray(val.ops) && val.ops.length === 0;
-        if (isControl) {
-          bindClickForControlVariant(key, currentSessionTag, pageUrl);
-        }
+      // For control variant (ops:[]) — click listener is never bound by makeOpApplier.
+      // Call bindClickForControlVariant on EVERY applyDomFeatures pass (not just first),
+      // because FEATURE_KEY_TO_SELECTOR may not be populated yet on the first call
+      // (inventory POST response arrives async after applyDomFeatures runs).
+      // CLICK_BOUND WeakSet ensures the listener is bound only once per element.
+      const isControl = Array.isArray(val.ops) && val.ops.length === 0;
+      if (isControl) {
+        bindClickForControlVariant(key, currentSessionTag, pageUrl);
       }
 
       if (!VIEWED_FEATURES.has(key)) {
