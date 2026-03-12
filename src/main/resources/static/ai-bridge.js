@@ -911,7 +911,10 @@
 
   // ---------- Init ----------
 
-  function init() {
+  function collectAndSendInventory() {
+    // Collect inventory AFTER all external stylesheets are applied so that
+    // computed colors (e.g. span.h1-red via CSS class) are correct and
+    // collectStyledChildren can detect children that override parent styles.
     const inv = collectInventory();
     window.gbGetInventory = () => inv;
     try {
@@ -926,7 +929,9 @@
       ts: Date.now(),
       inventory: inv
     });
+  }
 
+  function init() {
     const gbNow = getGrowthBookInstance();
     if (gbNow && typeof gbNow.setAttributes === "function") {
       try {
@@ -947,6 +952,14 @@
     waitForGrowthBookAndHook(8000);
     setTimeout(applyDomFeatures, 400);
     setTimeout(applyDomFeatures, 1500);
+
+    // Delay inventory collection until after window.load so all external
+    // CSS stylesheets are fully applied and computed styles are accurate.
+    if (document.readyState === "complete") {
+      setTimeout(collectAndSendInventory, 500);
+    } else {
+      window.addEventListener("load", () => setTimeout(collectAndSendInventory, 500), { once: true });
+    }
   }
 
   if (document.readyState === "loading") {
