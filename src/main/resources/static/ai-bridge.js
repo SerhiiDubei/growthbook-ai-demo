@@ -470,14 +470,6 @@
               if (op.prop === "background-color" || propName === "backgroundColor") {
                 el.style.setProperty("background-image", "none", "important");
               }
-              // Also apply to all child elements so inline styles on children
-              // (e.g. <span class="h1-red">) don't override the parent's style
-              el.querySelectorAll("*").forEach(child => {
-                child.style.setProperty(op.prop, String(op.value ?? ""), 'important');
-                if (op.prop === "background-color" || propName === "backgroundColor") {
-                  child.style.setProperty("background-image", "none", "important");
-                }
-              });
               console.log("[GB-bridge] Applied", op.prop, "=", op.value, "!important to", el);
             });
             break;
