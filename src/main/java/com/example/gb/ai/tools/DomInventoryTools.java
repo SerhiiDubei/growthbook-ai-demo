@@ -80,8 +80,12 @@ public class DomInventoryTools {
             "pageKey":"...",
             "pageUrl":"...",
             "itemsHash":"...",
-            "items":[{"kind":"...","text":"...","selector":"...","featureKey":"..."}, ...]
+            "items":[{"kind":"...","text":"...","selector":"...","featureKey":"...",
+                      "styledChildren":[{"selector":"...","tag":"...","classes":"...","computedColor":"..."}]}, ...]
           }
+          styledChildren: child elements that have their own CSS styles overriding the parent.
+          IMPORTANT: if styledChildren is present and contains a child with the same CSS property
+          you want to change, use the CHILD selector instead of the parent selector.
           """)
     public String getInventoryItemsByPageKeyJson(@P("Page key, e.g. localhost_8080__home") String pageKey) {
         try {
@@ -89,12 +93,7 @@ public class DomInventoryTools {
                     .orElseThrow(() -> new IllegalArgumentException("No inventory for pageKey=" + pageKey));
 
             List<Map<String, Object>> items = parseItems(e.getItemsJson()).stream()
-                    .map(i -> Map.<String, Object>of(
-                            "kind", i.getKind(),
-                            "text", i.getText(),
-                            "selector", i.getSelector(),
-                            "featureKey", i.getFeatureKey()
-                    ))
+                    .map(this::itemToMap)
                     .toList();
 
             Map<String, Object> result = new LinkedHashMap<>();
@@ -122,12 +121,7 @@ public class DomInventoryTools {
                     .orElseThrow(() -> new IllegalArgumentException("No inventory for pageUrl=" + pageUrl));
 
             List<Map<String, Object>> items = parseItems(e.getItemsJson()).stream()
-                    .map(i -> Map.<String, Object>of(
-                            "kind", i.getKind(),
-                            "text", i.getText(),
-                            "selector", i.getSelector(),
-                            "featureKey", i.getFeatureKey()
-                    ))
+                    .map(this::itemToMap)
                     .toList();
 
             Map<String, Object> result = new LinkedHashMap<>();
@@ -182,13 +176,7 @@ public class DomInventoryTools {
                     .findFirst()
                     .orElseThrow();
 
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("kind", best.getKind());
-            out.put("text", best.getText());
-            out.put("selector", best.getSelector());
-            out.put("featureKey", best.getFeatureKey());
-
-            return toJson(out);
+            return toJson(itemToMap(best));
         } catch (Exception ex) {
             return "ERROR: " + safeMsg(ex);
         }
@@ -276,6 +264,18 @@ public class DomInventoryTools {
 
     // ---------- Parsing helpers ----------
 
+    private Map<String, Object> itemToMap(ItemJson i) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("kind", i.getKind());
+        m.put("text", i.getText());
+        m.put("selector", i.getSelector());
+        m.put("featureKey", i.getFeatureKey());
+        if (i.getStyledChildren() != null && !i.getStyledChildren().isEmpty()) {
+            m.put("styledChildren", i.getStyledChildren());
+        }
+        return m;
+    }
+
     private List<ItemJson> parseItems(String itemsJson) {
         if (itemsJson == null || itemsJson.isBlank()) return List.of();
         try {
@@ -316,6 +316,7 @@ public class DomInventoryTools {
         private String text;
         private String selector;
         private String featureKey;
+        private List<Map<String, Object>> styledChildren;
 
         public String getKind() { return kind; }
         public void setKind(String kind) { this.kind = kind; }
@@ -328,5 +329,8 @@ public class DomInventoryTools {
 
         public String getFeatureKey() { return featureKey; }
         public void setFeatureKey(String featureKey) { this.featureKey = featureKey; }
+
+        public List<Map<String, Object>> getStyledChildren() { return styledChildren; }
+        public void setStyledChildren(List<Map<String, Object>> styledChildren) { this.styledChildren = styledChildren; }
     }
 }

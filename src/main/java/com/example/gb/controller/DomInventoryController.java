@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,10 +52,13 @@ public class DomInventoryController {
     }
 
     @Data
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class Item {
-        private String selector; // CSS selector
-        private String kind;     // heading/cta/...
-        private String text;     // current text
+        private String selector;   // CSS selector
+        private String kind;       // heading/cta/...
+        private String text;       // current text
         private String featureKey; // may be ignored by backend
+        // Child elements with their own styles that may override parent CSS
+        private List<Map<String, Object>> styledChildren;
     }
 }
