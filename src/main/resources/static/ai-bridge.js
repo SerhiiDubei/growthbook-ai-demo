@@ -207,6 +207,43 @@
     return false;
   }
 
+  // Collect inline styles on an element that are relevant for CSS experiments
+  function collectInlineStyles(el) {
+    const style = el.style;
+    if (!style || !style.length) return null;
+    const result = {};
+    for (let i = 0; i < style.length; i++) {
+      const prop = style[i];
+      result[prop] = style.getPropertyValue(prop);
+    }
+    return Object.keys(result).length ? result : null;
+  }
+
+  // Collect child elements that have their own inline styles or class-based color overrides
+  // so the AI agent knows to target them specifically instead of just the parent
+  function collectStyledChildren(el) {
+    const children = [];
+    el.querySelectorAll("*").forEach(child => {
+      const inlineStyles = collectInlineStyles(child);
+      const computedColor = window.getComputedStyle(child).color;
+      const parentComputedColor = window.getComputedStyle(el).color;
+      // Only include children that have their own styles or different computed color than parent
+      if (inlineStyles || computedColor !== parentComputedColor) {
+        const childSelector = uniqueSelector(child);
+        if (childSelector) {
+          children.push({
+            selector: childSelector,
+            tag: child.tagName.toLowerCase(),
+            classes: child.className && typeof child.className === "string" ? child.className.trim() : "",
+            inlineStyles: inlineStyles || {},
+            computedColor
+          });
+        }
+      }
+    });
+    return children.length ? children : null;
+  }
+
   function collectInventory() {
     const items = [];
 
@@ -217,11 +254,10 @@
       if (!selector) return;
 
       const text = (el.textContent || "").trim().slice(0, 140);
-      items.push({
-        kind: "heading",
-        text,
-        selector
-      });
+      const styledChildren = collectStyledChildren(el);
+      const item = { kind: "heading", text, selector };
+      if (styledChildren) item.styledChildren = styledChildren;
+      items.push(item);
     });
 
     // CTA / buttons / links — skip navigation/chrome, skip empty/icon-only links
@@ -236,13 +272,10 @@
       if (!label) return; // skip icon-only / decorative elements
 
       const href = (el.tagName === "A" ? (el.getAttribute("href") || "") : "");
-
-      items.push({
-        kind: "cta",
-        text: label,
-        href,
-        selector
-      });
+      const styledChildren = collectStyledChildren(el);
+      const item = { kind: "cta", text: label, href, selector };
+      if (styledChildren) item.styledChildren = styledChildren;
+      items.push(item);
     });
 
     // Plain <a> tags in main content only (not nav/chrome)
@@ -254,12 +287,10 @@
       const label = (el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 140);
       if (!label) return;
 
-      items.push({
-        kind: "cta",
-        text: label,
-        href: el.getAttribute("href") || "",
-        selector
-      });
+      const styledChildren = collectStyledChildren(el);
+      const item = { kind: "cta", text: label, href: el.getAttribute("href") || "", selector };
+      if (styledChildren) item.styledChildren = styledChildren;
+      items.push(item);
     });
 
     // Uniq by selector
