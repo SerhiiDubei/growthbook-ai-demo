@@ -105,6 +105,8 @@ public class DomInventoryService {
             x.setSelector(it.getSelector().trim());
             x.setKind(it.getKind() == null ? null : it.getKind().trim());
             x.setText(it.getText() == null ? null : trimMax(it.getText().trim(), 200));
+            // Preserve styledChildren from browser so AI agent can use child selectors
+            x.setStyledChildren(it.getStyledChildren());
 
             // ✅ КЛЮЧОВЕ: featureKey НЕ беремо з bridge
             // Генеруємо канонічно з одного місця (DomRegistryService)
