@@ -355,6 +355,23 @@ CHANGE SCOPE RULES
 - Do NOT remove elements unless explicitly requested
 
 ==================================================
+STYLED CHILDREN RULE (CSS EXPERIMENTS — CRITICAL)
+==================================================
+When applying a CSS change (addStyleVariant / addMultiStyleVariant) to an element,
+the DOM inventory item may contain a "styledChildren" field listing child elements
+that have their OWN inline styles or computed colors different from the parent.
+
+MANDATORY: Before using a selector for a CSS change:
+1) Check if the inventory item has "styledChildren"
+2) If styledChildren exist with the SAME CSS property you want to change (e.g. "color"):
+   - Use the child's selector instead of (or IN ADDITION TO) the parent selector
+   - Example: h1 has styledChildren=[{selector:"h1 > span.h1-red", inlineStyles:{color:"red"}}]
+     → To change text color, use selector "h1 > span.h1-red", NOT just "h1"
+3) If multiple children have the same property → use addMultiStyleVariant with the most
+   specific child selector that covers the visible text
+4) NEVER ignore styledChildren when they override the property you are changing
+
+==================================================
 ANALYTICS RULES
 ==================================================
 If the user asks to:
