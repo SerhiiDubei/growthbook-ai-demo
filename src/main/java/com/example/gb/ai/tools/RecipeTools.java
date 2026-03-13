@@ -2,7 +2,9 @@ package com.example.gb.ai.tools;
 
 import com.example.gb.model.ExperimentVariant;
 import com.example.gb.model.dto.AddVariantRequest;
+import com.example.gb.service.DomInventoryService;
 import com.example.gb.service.ExperimentService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -32,6 +34,7 @@ public class RecipeTools {
     private static final String ACTOR = "agent";
 
     private final ExperimentService experimentService;
+    private final DomInventoryService domInventoryService;
     private final ObjectMapper om;
 
     // -------------------------------------------------------------------------
@@ -225,10 +228,14 @@ public class RecipeTools {
             if (cssProperty == null || cssProperty.isBlank()) throw new IllegalArgumentException("cssProperty is blank");
             if (cssValue == null || cssValue.isBlank())   throw new IllegalArgumentException("cssValue is blank");
 
+            // Auto-resolve: if inventory item has styledChildren overriding this property,
+            // use the child selector instead to ensure the CSS change is actually visible
+            String resolvedSelector = resolveStyledChildSelector(experimentId, selector, cssProperty);
+
             String recipe = om.writeValueAsString(Map.of(
                     "ops", List.of(Map.of(
                             "action", "css",
-                            "selector", selector,
+                            "selector", resolvedSelector,
                             "prop", cssProperty,
                             "value", cssValue
                     ))
@@ -271,13 +278,26 @@ public class RecipeTools {
             if (selector == null || selector.isBlank()) throw new IllegalArgumentException("selector is blank");
             if (styleJson == null || styleJson.isBlank()) throw new IllegalArgumentException("styleJson is blank");
 
-            Object styleObj = om.readValue(styleJson, Object.class);
+            Map<String, Object> styleMap = om.readValue(styleJson, new TypeReference<>() {});
+
+            // Auto-resolve: check if any of the CSS properties is overridden by a styledChild
+            // Use first color-related property found for resolution
+            String resolvedSelector = selector;
+            for (String prop : styleMap.keySet()) {
+                // Convert camelCase to kebab for resolution
+                String kebab = prop.replaceAll("([A-Z])", "-$1").toLowerCase();
+                String resolved = resolveStyledChildSelector(experimentId, selector, kebab);
+                if (!resolved.equals(selector)) {
+                    resolvedSelector = resolved;
+                    break;
+                }
+            }
 
             String recipe = om.writeValueAsString(Map.of(
                     "ops", List.of(Map.of(
                             "action", "setStyle",
-                            "selector", selector,
-                            "value", styleObj
+                            "selector", resolvedSelector,
+                            "value", styleMap
                     ))
             ));
 
@@ -536,6 +556,65 @@ public class RecipeTools {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Automatically resolves the best CSS selector for a CSS property change.
+     * If the inventory item for the given selector has styledChildren that override
+     * the same CSS property, returns the child's selector instead of the parent.
+     * This prevents cases like h1 > span.h1-red overriding color set on h1.
+     */
+    private String resolveStyledChildSelector(long experimentId, String selector, String cssProperty) {
+        try {
+            var experiment = experimentService.get(experimentId);
+            if (experiment == null || experiment.getPageKey() == null) return selector;
+
+            // Convert kebab-case to camelCase for comparison with computedColor field
+            // e.g. "background-color" → "backgroundColor", "color" → "color"
+            String camelProp = cssProperty.replaceAll("-([a-z])", m2 ->
+                    String.valueOf(Character.toUpperCase(m2.charAt(1))));
+
+            var items = domInventoryService.getByPageUrl(experiment.getPageUrl() != null
+                    ? experiment.getPageUrl() : "");
+
+            for (var item : items) {
+                if (selector == null || !selector.trim().equalsIgnoreCase(
+                        item.getSelector() == null ? "" : item.getSelector().trim())) continue;
+
+                if (item.getStyledChildren() == null || item.getStyledChildren().isEmpty()) break;
+
+                // Find a child that has a non-neutral computed color for this property
+                for (var child : item.getStyledChildren()) {
+                    Object computedColor = child.get("computedColor");
+                    String childSelector = (String) child.get("selector");
+                    if (childSelector == null || childSelector.isBlank()) continue;
+
+                    // For "color" property: if child has non-black computed color → it overrides
+                    if (("color".equals(cssProperty) || "color".equals(camelProp))
+                            && computedColor != null
+                            && !computedColor.toString().equals("rgb(0, 0, 0)")
+                            && !computedColor.toString().equals("rgba(0, 0, 0, 1)")) {
+                        log.info("[RECIPE TOOL] resolveStyledChildSelector: replacing '{}' → '{}' (styledChildren override for {})",
+                                selector, childSelector, cssProperty);
+                        return childSelector;
+                    }
+
+                    // For other properties: if child has inlineStyles with the same property
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> inlineStyles = (Map<String, Object>) child.get("inlineStyles");
+                    if (inlineStyles != null && (inlineStyles.containsKey(cssProperty)
+                            || inlineStyles.containsKey(camelProp))) {
+                        log.info("[RECIPE TOOL] resolveStyledChildSelector: replacing '{}' → '{}' (inline style override for {})",
+                                selector, childSelector, cssProperty);
+                        return childSelector;
+                    }
+                }
+                break;
+            }
+        } catch (Exception e) {
+            log.warn("[RECIPE TOOL] resolveStyledChildSelector failed for selector={}: {}", selector, e.getMessage());
+        }
+        return selector;
+    }
 
     private String saveVariant(long experimentId, String key, String name,
                                 double weight, String recipeJson, int sortOrder) throws Exception {
