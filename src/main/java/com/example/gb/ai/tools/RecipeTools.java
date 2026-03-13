@@ -568,10 +568,14 @@ public class RecipeTools {
             var experiment = experimentService.get(experimentId);
             if (experiment == null || experiment.getPageKey() == null) return selector;
 
-            // Convert kebab-case to camelCase for comparison with computedColor field
-            // e.g. "background-color" → "backgroundColor", "color" → "color"
-            String camelProp = cssProperty.replaceAll("-([a-z])", m2 ->
-                    String.valueOf(Character.toUpperCase(m2.charAt(1))));
+            // Convert kebab-case to camelCase, e.g. "background-color" → "backgroundColor"
+            java.util.regex.Matcher kebabMatcher = java.util.regex.Pattern.compile("-([a-z])").matcher(cssProperty);
+            StringBuilder camelBuilder = new StringBuilder();
+            while (kebabMatcher.find()) {
+                kebabMatcher.appendReplacement(camelBuilder, kebabMatcher.group(1).toUpperCase());
+            }
+            kebabMatcher.appendTail(camelBuilder);
+            String camelProp = camelBuilder.toString();
 
             var items = domInventoryService.getByPageUrl(experiment.getPageUrl() != null
                     ? experiment.getPageUrl() : "");
