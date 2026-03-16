@@ -328,6 +328,16 @@
             }
           });
           console.debug("[GB-bridge] received featureKeys from backend:", KNOWN_FEATURE_KEYS.length, KNOWN_FEATURE_KEYS);
+
+          // IMPORTANT: bindClickForControlVariant relies on FEATURE_KEY_TO_SELECTOR which is
+          // populated here asynchronously — after applyDomFeatures already ran at t=400ms/1500ms.
+          // So we retry binding control click listeners NOW, after the map is ready.
+          const currentTag = readCookie("gb_tag") || sessionTag || "";
+          KNOWN_FEATURE_KEYS.forEach(fk => {
+            if (FEATURE_KEY_TO_SELECTOR[fk]) {
+              bindClickForControlVariant(fk, currentTag, location.href);
+            }
+          });
         }
       } catch (_) {}
     } catch (e) {
@@ -754,10 +764,11 @@
   // ---------- Click tracking for control variant ----------
 
   /**
-   * Control variant has ops:[] — makeOpApplier never runs, so no click listener is bound.
-   * This function finds the DOM element for the featureKey via stored inventory
-   * (sessionStorage __GB_INV__) and binds a click listener directly.
-   * Only binds if the element is found and not already bound (CLICK_BOUND WeakSet).
+   * Binds a click listener on the DOM element for a given featureKey.
+   * Used for control variant (ops:[]) where makeOpApplier never runs.
+   * Also called after inventory response to fix race condition where
+   * FEATURE_KEY_TO_SELECTOR was not yet populated at applyDomFeatures time.
+   * CLICK_BOUND WeakSet prevents double-binding if treatment already bound.
    */
   function bindClickForControlVariant(featureKey, sessTag, pageUrl) {
     try {
@@ -774,8 +785,6 @@
         return;
       }
 
-      const assignedVariant = FEATURE_VARIANTS[featureKey] || "control";
-
       nodes.forEach(el => {
         if (CLICK_BOUND.has(el)) return;
         CLICK_BOUND.add(el);
@@ -783,6 +792,8 @@
         el.addEventListener("click", () => {
           const tag  = sessTag || readCookie("gb_tag") || sessionTag || "";
           const page = pageUrl || location.href;
+          // Read variant at click time — GB SDK may have resolved it after binding
+          const assignedVariant = FEATURE_VARIANTS[featureKey] || "control";
 
           sendTrackEvent({
             featureKey,
@@ -794,7 +805,7 @@
             meta: {
               source: "dom-bridge",
               selector,
-              kind: "control"
+              kind: assignedVariant
             }
           });
         }, { passive: true });
